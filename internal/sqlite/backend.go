@@ -27,19 +27,19 @@ type Connector struct{}
 func (c Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 	dsn := fmt.Sprintf("%s?mode=ro", cfg.Path)
 	log.Printf("Opening readonly connection [path=%s]", cfg.Path)
-	return gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
 func (c Connector) ConnectWrite(cfg WriteConfig) (DB, error) {
 	dsn := fmt.Sprintf("%s?mode=rw", cfg.Path)
 	log.Printf("Opening read-write connection [path=%s]", cfg.Path)
-	return gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
 func (c Connector) ConnectAdmin(cfg AdminConfig) (DB, error) {
 	dsn := fmt.Sprintf("%s?mode=rw", cfg.Path)
 	log.Printf("Opening admin connection [path=%s]", cfg.Path)
-	return gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
 func init() {

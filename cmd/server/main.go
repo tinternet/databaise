@@ -20,7 +20,10 @@ func main() {
 	transportMode := flag.String("transport", "http", "Transport mode: http or stdio")
 	configPath := flag.String("config", "config.json", "Path to configuration file")
 	httpAddress := flag.String("address", "0.0.0.0:8888", "HTTP server address (only used in http mode)")
+	gormLogLevel := flag.String("gorm-log-level", "silent", "GORM log level: silent, error, warn, info")
 	flag.Parse()
+
+	logging.SetGormLogLevel(logging.ParseGormLogLevel(*gormLogLevel))
 
 	if *transportMode == "stdio" {
 		logging.SetOutput(os.Stderr)

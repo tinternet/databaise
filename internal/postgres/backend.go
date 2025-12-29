@@ -26,7 +26,7 @@ type Connector struct{}
 func (b Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 	log.Printf("Opening read connection")
 
-	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
 	if err != nil {
 		return nil, err
 	}
@@ -46,12 +46,12 @@ func (b Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 
 func (b Connector) ConnectWrite(cfg WriteConfig) (DB, error) {
 	log.Printf("Opening write connection")
-	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{})
+	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
 func (b Connector) ConnectAdmin(cfg AdminConfig) (DB, error) {
 	log.Printf("Opening admin connection")
-	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{})
+	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
 func init() {

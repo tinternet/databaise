@@ -9,7 +9,6 @@ import (
 	"github.com/tinternet/databaise/internal/sqlcommon"
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 var log = logging.New("sqlserver")
@@ -27,7 +26,7 @@ type Connector struct{}
 func (c Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 	log.Printf("Opening read connection")
 
-	db, err := gorm.Open(sqlserver.Open(cfg.DSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
+	db, err := gorm.Open(sqlserver.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
 	if err != nil {
 		return nil, err
 	}
@@ -47,12 +46,12 @@ func (c Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 
 func (c Connector) ConnectWrite(cfg WriteConfig) (DB, error) {
 	log.Printf("Opening write connection")
-	return gorm.Open(sqlserver.Open(cfg.DSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
+	return gorm.Open(sqlserver.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
 func (c Connector) ConnectAdmin(cfg AdminConfig) (DB, error) {
 	log.Printf("Opening admin connection")
-	return gorm.Open(sqlserver.Open(cfg.DSN), &gorm.Config{Logger: logger.Default.LogMode(logger.Info)})
+	return gorm.Open(sqlserver.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
 func init() {
