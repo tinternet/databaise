@@ -263,6 +263,35 @@ func TestDropIndex(t *testing.T) {
 	require.True(t, res.Success)
 }
 
+func TestExplainQuery(t *testing.T) {
+	t.Parallel()
+
+	seed := `
+		CREATE TABLE TestExplainQuery (
+			ID int,
+			Field1 TEXT NOT NULL,
+			Field2 BIT NOT NULL DEFAULT 1,
+			Field3 BIGINT NULL
+		);
+		INSERT INTO TestExplainQuery(id, field1)
+		VALUES (1, 'asd'), (2, 'qwe');
+	`
+	db := openTestConnection(t, seed, os.TempDir()+"/test_explain_query.db")
+
+	t.Run("Explain", func(t *testing.T) {
+		t.Parallel()
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM TestExplainQuery"}, db)
+		require.NoError(t, err)
+		require.Greater(t, len(res.Plan), 0)
+	})
+	t.Run("ExplainQueryPlan", func(t *testing.T) {
+		t.Parallel()
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM TestExplainQuery", QueryPlan: true}, db)
+		require.NoError(t, err)
+		require.Greater(t, len(res.Plan), 0)
+	})
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

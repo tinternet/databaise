@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/tinternet/databaise/internal/sqlcommon"
@@ -142,4 +143,35 @@ func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error
 		return &DropIndexOut{Success: false, Message: err.Error()}, err
 	}
 	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s.%s", schema, in.Name)}, nil
+}
+
+type ExplainQueryIn struct {
+	Query   string `json:"query" jsonschema:"The SQL query to explain,required"`
+	Analyze bool   `json:"analyze" jsonschema:"Whether to execute the query for actual runtime statistics"`
+}
+
+type ExplainQueryOut struct {
+	Plan map[string]any `json:"plan" jsonschema:"The execution plan of the query"`
+}
+
+func ExplainQuery(ctx context.Context, in ExplainQueryIn, db DB) (*ExplainQueryOut, error) {
+	var out ExplainQueryOut
+	var analyze string
+	if in.Analyze {
+		analyze = "ANALYZE, "
+	}
+
+	var plan string
+	err := db.WithContext(ctx).Raw(fmt.Sprintf("EXPLAIN (%sFORMAT JSON) %s", analyze, in.Query)).Scan(&plan).Error
+
+	if err == nil {
+		var plans []map[string]any
+		err = json.Unmarshal([]byte(plan), &plans)
+
+		if err == nil && len(plans) > 0 {
+			out.Plan = plans[0]["Plan"].(map[string]any)
+		}
+	}
+
+	return &out, err
 }

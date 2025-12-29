@@ -94,7 +94,7 @@ func init() {
 	// backend.AddWriteTool(&b, "write_query", "[PostgreSQL] Execute a SQL statement that modifies data (INSERT, UPDATE, DELETE).", ExecuteWrite)
 
 	// Admin tools
-	// backend.AddAdminTool(&b, "admin_query", "[PostgreSQL] Execute administrative SQL (DDL, maintenance).", ExecuteAdmin)
+	backend.AddAdminTool(&b, "explain_query", "[PostgreSQL] Explain a query's execution plan.", ExplainQuery)
 	backend.AddAdminTool(&b, "create_index", "[PostgreSQL] Create an index on a table.", CreateIndex)
 	backend.AddAdminTool(&b, "drop_index", "[PostgreSQL] Drop an index on a table.", DropIndex)
 

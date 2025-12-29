@@ -78,7 +78,7 @@ Tools are registered based on which config sections are present:
 |----------------|------------------|
 | `read` | `{db}_list_tables`, `{db}_describe_table`, `{db}_read_query` |
 | `write` | *Planned* |
-| `admin` | `{db}_create_index` |
+| `admin` | `{db}_create_index`, `{db}_drop_index`, `{db}_explain_query` |
 
 **Global tools:**
 - `list_databases` - List all configured databases with their available tools
@@ -102,9 +102,7 @@ Planned tools and features:
 **Write tools** - Insert, update, and delete operations (approach TBD - considering ORM-style `insert_record`/`update_record`/`delete_record` vs raw `write_query`)
 
 **Admin tools:**
-- `{db}_drop_index` - Drop an existing index
 - `{db}_slow_queries` - Get slowest queries from database logs/stats
-- `{db}_explain_query` - Run EXPLAIN ANALYZE on a query
 
 **Other:**
 - MySQL support

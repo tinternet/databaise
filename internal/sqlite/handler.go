@@ -129,3 +129,21 @@ func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error
 	}
 	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s", in.Name)}, nil
 }
+
+type ExplainQueryIn struct {
+	Query     string `json:"query" jsonschema:"The SQL query to explain,required"`
+	QueryPlan bool   `json:"query_plan,omitempty" jsonschema:"Whether to use EXPLAIN QUERY PLAN or EXPLAIN."`
+}
+
+type ExplainQueryOut struct {
+	Plan []map[string]any `json:"plan" jsonschema:"The query execution plan"`
+}
+
+func ExplainQuery(ctx context.Context, in ExplainQueryIn, db DB) (out ExplainQueryOut, err error) {
+	var suffix string
+	if in.QueryPlan {
+		suffix = " QUERY PLAN"
+	}
+	err = db.WithContext(ctx).Raw("EXPLAIN" + suffix + " " + in.Query).Scan(&out.Plan).Error
+	return
+}

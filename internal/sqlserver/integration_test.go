@@ -309,6 +309,38 @@ func TestDropIndex(t *testing.T) {
 	require.True(t, res.Success)
 }
 
+func TestExplainQuery(t *testing.T) {
+	t.Parallel()
+
+	seed := `
+		IF OBJECT_ID('dbo.TestExplainQuery ') IS NOT NULL DROP TABLE dbo.TestExplainQuery 
+		CREATE TABLE dbo.TestExplainQuery (
+			ID int,
+			Field1 VARCHAR(50) NOT NULL,
+			Field2 BIT NOT NULL DEFAULT 1,
+			Field3 BIGINT NULL
+		);
+		INSERT INTO dbo.TestExplainQuery(id, field1)
+		VALUES (1, 'asd'), (2, 'qwe');
+	`
+	cleanup := `DROP TABLE dbo.TestExplainQuery`
+	db := openTestConnection(t, seed, cleanup)
+
+	t.Run("Estimated", func(t *testing.T) {
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM dbo.TestExplainQuery", ActualExecutionPlan: false}, db)
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		require.Contains(t, res.Plan, "<ShowPlanXML")
+	})
+	t.Run("Actual", func(t *testing.T) {
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT id FROM dbo.TestExplainQuery", ActualExecutionPlan: true}, db)
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		require.Contains(t, res.Plan, "<ShowPlanXML")
+		require.Equal(t, []map[string]any{{"id": int64(1)}, {"id": int64(2)}}, res.Rows)
+	})
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

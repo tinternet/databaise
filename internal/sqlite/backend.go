@@ -54,7 +54,7 @@ func init() {
 	// backend.AddWriteTool(&b, "write_query", "[SQLite] Execute a SQL statement that modifies data (INSERT, UPDATE, DELETE).", ExecuteWrite)
 
 	// Admin tools
-	// backend.AddAdminTool(&b, "admin_query", "[SQLite] Execute administrative SQL (DDL, maintenance).", ExecuteAdmin)
+	backend.AddAdminTool(&b, "explain_query", "[SQLite] Run a query with execution plan enabled.", ExplainQuery)
 	backend.AddAdminTool(&b, "create_index", "[SQLite] Create an index on a table.", CreateIndex)
 	backend.AddAdminTool(&b, "drop_index", "[SQLite] Drop an index on a table.", DropIndex)
 

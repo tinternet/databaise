@@ -142,3 +142,69 @@ func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error
 	}
 	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s on %s.%s", in.Name, in.Schema, in.Table)}, nil
 }
+
+type ExplainQueryIn struct {
+	Query               string `json:"query" jsonschema:"The SQL query to explain,required"`
+	ActualExecutionPlan bool   `json:"actual_execution_plan,omitempty" jsonschema:"Whether to execute the query and get the actual execution plan"`
+}
+
+type ExplainQueryOut struct {
+	Plan string           `json:"plan" jsonschema:"The execution plan for the query in XML format"`
+	Rows []map[string]any `json:"rows,omitempty" jsonschema:"The result rows if actual_execution_plan is true"`
+}
+
+func ExplainQuery(ctx context.Context, in ExplainQueryIn, db DB) (*ExplainQueryOut, error) {
+	tx := db.WithContext(ctx).Begin()
+	defer tx.Rollback()
+	if err := tx.Error; err != nil {
+		return nil, err
+	}
+	var enable, disable string
+	if in.ActualExecutionPlan {
+		enable = "SET STATISTICS XML ON;"
+		disable = "SET STATISTICS XML OFF;"
+	} else {
+		enable = "SET SHOWPLAN_XML ON;"
+		disable = "SET SHOWPLAN_XML OFF;"
+	}
+	if err := tx.Exec(enable).Error; err != nil {
+		return nil, err
+	}
+
+	var plan string
+	var results []map[string]any
+
+	if in.ActualExecutionPlan {
+		// For actual execution plan, we need to execute the query
+		rows, err := tx.Raw(in.Query).Rows()
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			if err := db.ScanRows(rows, &results); err != nil {
+				return nil, err
+			}
+		}
+
+		// The execution plan is returned in the next result set
+		if rows.NextResultSet() {
+			if rows.Next() {
+				if err := rows.Scan(&plan); err != nil {
+					return nil, err
+				}
+			}
+		}
+	} else {
+		// For estimated plan, the plan is in the first result set
+		if err := tx.Raw(in.Query).Scan(&plan).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Exec(disable).Error; err != nil {
+		return nil, err
+	}
+	return &ExplainQueryOut{Plan: plan, Rows: results}, nil
+}
