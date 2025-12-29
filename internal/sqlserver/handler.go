@@ -61,9 +61,9 @@ const listIndexesQuery = `
 	WHERE s.name = CASE @schema WHEN '' THEN s.name ELSE @schema END AND t.name = @table
 `
 
-func ListTables(ctx context.Context, in ListTablesIn, db DB) (ListTablesOut, error) {
-	var out ListTablesOut
-	return out, db.WithContext(ctx).Raw(listTablesQuery, sql.Named("schema", in.Schema)).Scan(&out.Tables).Error
+func ListTables(ctx context.Context, in ListTablesIn, db DB) (out ListTablesOut, err error) {
+	err = db.WithContext(ctx).Raw(listTablesQuery, sql.Named("schema", in.Schema)).Scan(&out.Tables).Error
+	return
 }
 
 func DescribeTable(ctx context.Context, in DescribeTableIn, db DB) (*DescribeTableOut, error) {
@@ -85,9 +85,9 @@ func DescribeTable(ctx context.Context, in DescribeTableIn, db DB) (*DescribeTab
 	return &out, nil
 }
 
-func ExecuteQuery(ctx context.Context, in ExecuteQueryIn, db DB) (ExecuteQueryOut, error) {
-	var out ExecuteQueryOut
-	return out, db.WithContext(ctx).Raw(in.Query).Scan(&out.Rows).Error
+func ExecuteQuery(ctx context.Context, in ExecuteQueryIn, db DB) (out ExecuteQueryOut, err error) {
+	err = db.WithContext(ctx).Raw(in.Query).Scan(&out.Rows).Error
+	return
 }
 
 func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut, error) {
