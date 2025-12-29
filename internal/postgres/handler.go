@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/tinternet/databaise/internal/sqlcommon"
+	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -50,21 +51,26 @@ const listIndexesQuery = `
 	WHERE n.nspname = COALESCE(NULLIF($1, ''), 'public') AND t.relname = $2
 `
 
-func ListTables(ctx context.Context, in ListTablesIn, db DB) (*ListTablesOut, error) {
-	var out ListTablesOut
-	if err := db.WithContext(ctx).Raw(listTablesQuery, in.Schema).Scan(&out.Tables).Error; err != nil {
-		return nil, err
-	}
-	return &out, nil
+func ListTables(ctx context.Context, in ListTablesIn, db DB) (out ListTablesOut, err error) {
+	err = db.WithContext(ctx).Raw(listTablesQuery, in.Schema).Scan(&out.Tables).Error
+	return
 }
 
 func DescribeTable(ctx context.Context, in DescribeTableIn, db DB) (*DescribeTableOut, error) {
 	out := DescribeTableOut{Schema: in.Schema, Name: in.Table}
-	if err := db.WithContext(ctx).Raw(listColumnsQuery, in.Schema, in.Table).Scan(&out.Columns).Error; err != nil {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(2)
+	g.Go(func() error {
+		return db.WithContext(ctx).Raw(listColumnsQuery, in.Schema, in.Table).Scan(&out.Columns).Error
+	})
+	g.Go(func() error {
+		return db.WithContext(ctx).Raw(listIndexesQuery, in.Schema, in.Table).Scan(&out.Indexes).Error
+	})
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	if err := db.WithContext(ctx).Raw(listIndexesQuery, in.Schema, in.Table).Scan(&out.Indexes).Error; err != nil {
-		return nil, err
+	if len(out.Columns) == 0 {
+		return nil, sqlcommon.ErrTableNotFound
 	}
 	return &out, nil
 }
