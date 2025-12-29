@@ -1,0 +1,96 @@
+[
+  {
+    "name": "daily_sales",
+    "description": "Daily sales summary for the last N days",
+    "connection": "production",
+    "query": "SELECT date, SUM(amount) as total, COUNT(*) as order_count FROM sales WHERE date >= CURRENT_DATE - $1::interval GROUP BY date ORDER BY date DESC",
+    "parameters": [
+      {
+        "name": "days",
+        "type": "string",
+        "description": "Number of days to look back (e.g., '7 days', '1 month')",
+        "required": false,
+        "default": "7 days"
+      }
+    ]
+  },
+  {
+    "name": "top_customers",
+    "description": "Top customers by total purchase amount",
+    "connection": "production",
+    "query": "SELECT customer_id, customer_name, email, SUM(amount) as total_spent, COUNT(*) as order_count FROM orders o JOIN customers c ON o.customer_id = c.id GROUP BY customer_id, customer_name, email ORDER BY total_spent DESC LIMIT $1",
+    "parameters": [
+      {
+        "name": "limit",
+        "type": "int",
+        "description": "Number of customers to return",
+        "required": false,
+        "default": 10
+      }
+    ]
+  },
+  {
+    "name": "slow_moving_inventory",
+    "description": "Products with low sales velocity",
+    "connection": "production",
+    "query": "SELECT p.id, p.name, p.category, COUNT(oi.id) as times_sold, SUM(oi.quantity) as total_quantity FROM products p LEFT JOIN order_items oi ON p.id = oi.product_id WHERE oi.created_at >= CURRENT_DATE - INTERVAL '30 days' GROUP BY p.id, p.name, p.category HAVING COUNT(oi.id) < $1 ORDER BY times_sold ASC",
+    "parameters": [
+      {
+        "name": "threshold",
+        "type": "int",
+        "description": "Maximum number of sales to be considered slow-moving",
+        "required": false,
+        "default": 5
+      }
+    ]
+  },
+  {
+    "name": "revenue_by_category",
+    "description": "Revenue breakdown by product category for a date range",
+    "connection": "production",
+    "query": "SELECT p.category, SUM(oi.quantity * oi.price) as revenue, COUNT(DISTINCT o.id) as order_count, SUM(oi.quantity) as items_sold FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.created_at BETWEEN $1 AND $2 GROUP BY p.category ORDER BY revenue DESC",
+    "parameters": [
+      {
+        "name": "start_date",
+        "type": "date",
+        "description": "Start date (YYYY-MM-DD)",
+        "required": true
+      },
+      {
+        "name": "end_date",
+        "type": "date",
+        "description": "End date (YYYY-MM-DD)",
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "user_activity",
+    "description": "User login and activity summary",
+    "connection": "production",
+    "query": "SELECT user_id, username, COUNT(*) as login_count, MAX(created_at) as last_login, MIN(created_at) as first_login FROM user_sessions WHERE created_at >= CURRENT_DATE - INTERVAL '30 days' GROUP BY user_id, username ORDER BY login_count DESC",
+    "parameters": []
+  },
+  {
+    "name": "database_table_sizes",
+    "description": "Size of all tables in the database",
+    "connection": "production",
+    "query": "SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size, pg_total_relation_size(schemaname||'.'||tablename) as size_bytes FROM pg_tables WHERE schemaname = 'public' ORDER BY size_bytes DESC",
+    "parameters": []
+  },
+  {
+    "name": "active_user_count",
+    "description": "Count of active users in the last N days",
+    "connection": "production",
+    "query": "SELECT COUNT(DISTINCT user_id) as active_users FROM user_activity WHERE last_activity >= CURRENT_DATE - $1::interval",
+    "parameters": [
+      {
+        "name": "days",
+        "type": "string",
+        "description": "Time period (e.g., '7 days', '1 month')",
+        "required": false,
+        "default": "7 days"
+      }
+    ]
+  }
+]

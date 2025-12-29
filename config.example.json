@@ -1,0 +1,50 @@
+{
+    "netflix": {
+        "type": "postgres",
+        "description": "Netflix viewership data and catalog.",
+        "read": {
+            "enforce_readonly": false,
+            "dsn": "postgres://postgres:mysecretpassword@postgres:5432/postgres?sslmode=disable&TimeZone=Asia/Shanghai"
+        },
+        "write": {
+            "dsn": "postgres://postgres:mysecretpassword@postgres:5432/postgres?sslmode=disable&TimeZone=Asia/Shanghai"
+        },
+        "admin": {
+            "dsn": "postgres://postgres:mysecretpassword@postgres:5432/postgres?sslmode=disable&TimeZone=Asia/Shanghai"
+        }
+    },
+
+    "sales_db": {
+        "type": "sqlserver",
+        "description": "Sales data.",
+        "read": {
+            "dsn": "sqlserver://sa:yourStrong(password@mssql:1433/?database=AdventureWorksLT2022",
+            "enforce_readonly": false
+        },
+        "admin": {
+            "dsn": "sqlserver://sa:yourStrong(password@mssql:1433/?database=AdventureWorksLT2022"
+        }
+    },
+
+    "cache": {
+        "type": "sqlite",
+        "description": "Local cache for user sessions.",
+        "read": {
+            "path": "/tmp/cache.db"
+        }
+    },
+
+    "app_data": {
+        "type": "sqlite",
+        "description": "Application data with full access.",
+        "read": {
+            "path": "/tmp/app.db"
+        },
+        "write": {
+            "path": "/tmp/app.db"
+        },
+        "admin": {
+            "path": "/tmp/app.db"
+        }
+    }
+}
