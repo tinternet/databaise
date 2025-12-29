@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/tinternet/databaise/internal/sqlcommon"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -69,6 +71,17 @@ func DescribeTable(ctx context.Context, in DescribeTableIn, db DB) (*DescribeTab
 
 func ExecuteQuery(ctx context.Context, in ExecuteQueryIn, db DB) (*ExecuteQueryOut, error) {
 	var out ExecuteQueryOut
+
+	if db.UseReadonlyTx {
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return tx.Raw(in.Query).Scan(&out.Rows).Error
+		}, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
+	}
+
 	if err := db.WithContext(ctx).Raw(in.Query).Scan(&out.Rows).Error; err != nil {
 		return nil, err
 	}

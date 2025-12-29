@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/tinternet/databaise/internal/backend"
 	"github.com/tinternet/databaise/internal/config"
@@ -14,27 +15,54 @@ import (
 var log = logging.New("postgres")
 
 type (
-	ReadConfig  = config.ReadConfig
 	WriteConfig = config.WriteConfig
 	AdminConfig = config.AdminConfig
 )
 
-type DB = *gorm.DB
+type ReadConfig struct {
+	config.ReadConfig
+	UseReadonlyTx bool `json:"use_readonly_tx"`
+}
+
+type DB struct {
+	*gorm.DB
+	UseReadonlyTx bool
+}
 
 type Connector struct{}
+
+func openConnection(dsn string, gormCfg *gorm.Config, useReadonlyTx bool) (DB, error) {
+	db, err := gorm.Open(postgres.Open(dsn), gormCfg)
+	if err != nil {
+		return DB{}, err
+	}
+	return DB{DB: db, UseReadonlyTx: useReadonlyTx}, nil
+}
 
 func (b Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 	log.Printf("Opening read connection")
 
-	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
+	gormConfig := &gorm.Config{Logger: logging.NewGormLogger()}
+
+	if cfg.UseReadonlyTx {
+		gormConfig.PrepareStmt = true
+		gormConfig.PrepareStmtTTL = time.Minute * 5
+	}
+
+	db, err := openConnection(cfg.DSN, gormConfig, cfg.UseReadonlyTx)
 	if err != nil {
-		return nil, err
+		return DB{}, err
+	}
+
+	if cfg.UseReadonlyTx {
+		log.Println("Using postgres readonly trasnactions with prepared statements (use_readonly_tx: true)")
+		return db, nil
 	}
 
 	// Verify readonly permissions if enforcement is enabled
 	if cfg.ShouldEnforceReadonly() {
-		if !sqlcommon.VerifyReadonly(db, sqlcommon.PostgreSQLVerifyReadonlySQL) {
-			return nil, fmt.Errorf("read DSN user has write permissions (set enforce_readonly: false to bypass)")
+		if !sqlcommon.VerifyReadonly(db.DB, sqlcommon.PostgreSQLVerifyReadonlySQL) {
+			return DB{}, fmt.Errorf("read DSN user has write permissions (set enforce_readonly: false to bypass)")
 		}
 		log.Printf("Verified read connection is readonly")
 	} else {
@@ -46,12 +74,12 @@ func (b Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 
 func (b Connector) ConnectWrite(cfg WriteConfig) (DB, error) {
 	log.Printf("Opening write connection")
-	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
+	return openConnection(cfg.DSN, &gorm.Config{Logger: logging.NewGormLogger()}, false)
 }
 
 func (b Connector) ConnectAdmin(cfg AdminConfig) (DB, error) {
 	log.Printf("Opening admin connection")
-	return gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{Logger: logging.NewGormLogger()})
+	return openConnection(cfg.DSN, &gorm.Config{Logger: logging.NewGormLogger()}, false)
 }
 
 func init() {

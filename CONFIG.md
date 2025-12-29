@@ -77,7 +77,8 @@ Only include the sections you want to enable. Omit a section to disable those to
         "description": "Netflix viewership data and catalog.",
         "read": {
             "dsn": "postgres://reader:pass@localhost:5432/netflix",
-            "enforce_readonly": true
+            "enforce_readonly": true,
+            "use_readonly_tx": false
         },
         "write": {
             "dsn": "postgres://writer:pass@localhost:5432/netflix"
@@ -94,9 +95,16 @@ Only include the sections you want to enable. Omit a section to disable those to
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `dsn` | string | required | PostgreSQL connection string |
-| `enforce_readonly` | bool | `true` | Verify read user has no write permissions at startup |
+| `enforce_readonly` | bool | `true` | **Startup Check**: Verifies the database user cannot write. |
+| `use_readonly_tx` | bool | `false` | **Runtime Check**: Enforces read-only mode on every query. |
 
-**Readonly enforcement:** By default, the server verifies at startup that the `read` DSN user cannot write. Set `enforce_readonly: false` to bypass this check (e.g., when you know the user has write perms but want read-only tools anyway).
+**Startup Check:** By default, the server connects at startup and verifies that the database user lacks write permissions. If the user does have write permissions (but you still want to proceed), set `enforce_readonly: false`.
+
+**Runtime Check** When `use_readonly_tx: true`, the server skips the startup check and instead enforces safety by wrapping every query in a `READ ONLY` transaction. This uses prepared statements to strictly confine the LLM in two ways:
+
+1) **Single Statement:** The protocol enforces a single SQL statement per request, which prevents query stacking (injecting `;COMMIT;` followed by a malicious write).
+2) **Transaction Containment:** PostgreSQL's `EXECUTE` statement explicitly forbids transaction control commands, making it impossible to escape the read-only transaction context using tricks like `EXECUTE "COMMIT; DROP TABLE ..."`
+
 
 ### SQLite
 
