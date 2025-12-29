@@ -3,18 +3,61 @@
 package sqlserver
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mssql"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/tinternet/databaise/internal/config"
 	"github.com/tinternet/databaise/internal/sqlcommon"
 )
 
-var sqlserverTestDSN = os.Getenv("TEST_MSSQL_DSN")
+var sqlserverTestDSN string
 
 func TestMain(m *testing.M) {
-	os.Exit(m.Run())
+	ctx := context.Background()
+	mssqlContainer, err := mssql.Run(ctx,
+		"mcr.microsoft.com/mssql/server:2022-CU10-ubuntu-22.04",
+		mssql.WithAcceptEULA(),
+		mssql.WithPassword("Password!!!1234"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("SQL Server is now ready for client connections").
+				WithStartupTimeout(60*time.Second),
+		),
+	)
+
+	if err != nil {
+		panic(err)
+	}
+
+	host, err := mssqlContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	port, err := mssqlContainer.MappedPort(ctx, "1433/tcp")
+	if err != nil {
+		panic(err)
+	}
+
+	sqlserverTestDSN = fmt.Sprintf(
+		"sqlserver://sa:Password!!!1234@%s:%s?encrypt=disable",
+		host,
+		port.Port(),
+	)
+
+	code := m.Run()
+
+	if err := testcontainers.TerminateContainer(mssqlContainer); err != nil {
+		log.Printf("failed to terminate container: %s", err)
+	}
+
+	os.Exit(code)
 }
 
 func openTestConnection(t *testing.T, seed, cleanup string) DB {
@@ -25,13 +68,6 @@ func openTestConnection(t *testing.T, seed, cleanup string) DB {
 	if seed != "" {
 		require.NoError(t, db.WithContext(t.Context()).Exec(seed).Error)
 	}
-	t.Cleanup(func() {
-		if cleanup != "" {
-			db.Exec(cleanup)
-		}
-		db, _ := db.DB()
-		db.Close()
-	})
 	return db
 }
 
@@ -41,14 +77,8 @@ func TestConnectRead(t *testing.T) {
 		DSN:             sqlserverTestDSN,
 		EnforceReadonly: new(bool),
 	})
-	t.Cleanup(func() {
-		if err == nil {
-			db, _ := db.DB()
-			db.Close()
-		}
-	})
-	require.NotNil(t, db)
 	require.NoError(t, err)
+	require.NotNil(t, db)
 }
 
 func TestConnectReadEnforceReadonly(t *testing.T) {
@@ -66,10 +96,6 @@ func TestConnectWrite(t *testing.T) {
 	db, err := Connector{}.ConnectWrite(config.WriteConfig{
 		DSN: sqlserverTestDSN,
 	})
-	t.Cleanup(func() {
-		db, _ := db.DB()
-		db.Close()
-	})
 	require.NotNil(t, db)
 	require.NoError(t, err)
 }
@@ -78,10 +104,6 @@ func TestConnectAdmin(t *testing.T) {
 	t.Parallel()
 	db, err := Connector{}.ConnectAdmin(config.AdminConfig{
 		DSN: sqlserverTestDSN,
-	})
-	t.Cleanup(func() {
-		db, _ := db.DB()
-		db.Close()
 	})
 	require.NotNil(t, db)
 	require.NoError(t, err)
@@ -218,7 +240,7 @@ func TestExecuteQuery(t *testing.T) {
 	t.Parallel()
 
 	seed := `
-		IF OBJECT_ID('dbo.TestExecuteQuery ') IS NOT NULL DROP TABLE dbo.TestExecuteQuery 
+		IF OBJECT_ID('dbo.TestExecuteQuery ') IS NOT NULL DROP TABLE dbo.TestExecuteQuery
 		CREATE TABLE dbo.TestExecuteQuery (
 			ID int,
 			Field1 VARCHAR(50) NOT NULL,
@@ -245,7 +267,7 @@ func TestCreateIndex(t *testing.T) {
 	t.Parallel()
 
 	seed := `
-		IF OBJECT_ID('dbo.TestCreateIndex ') IS NOT NULL DROP TABLE dbo.TestCreateIndex 
+		IF OBJECT_ID('dbo.TestCreateIndex ') IS NOT NULL DROP TABLE dbo.TestCreateIndex
 		CREATE TABLE dbo.TestCreateIndex (
 			ID int,
 			Field1 VARCHAR(50) NOT NULL,
@@ -285,7 +307,7 @@ func TestDropIndex(t *testing.T) {
 	t.Parallel()
 
 	seed := `
-		IF OBJECT_ID('dbo.TestDropIndex ') IS NOT NULL DROP TABLE dbo.TestDropIndex 
+		IF OBJECT_ID('dbo.TestDropIndex ') IS NOT NULL DROP TABLE dbo.TestDropIndex
 		CREATE TABLE dbo.TestDropIndex (
 			ID int,
 			Field1 VARCHAR(50) NOT NULL,
@@ -313,7 +335,7 @@ func TestExplainQuery(t *testing.T) {
 	t.Parallel()
 
 	seed := `
-		IF OBJECT_ID('dbo.TestExplainQuery ') IS NOT NULL DROP TABLE dbo.TestExplainQuery 
+		IF OBJECT_ID('dbo.TestExplainQuery ') IS NOT NULL DROP TABLE dbo.TestExplainQuery
 		CREATE TABLE dbo.TestExplainQuery (
 			ID int,
 			Field1 VARCHAR(50) NOT NULL,

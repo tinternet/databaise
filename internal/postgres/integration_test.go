@@ -3,18 +3,47 @@
 package postgres
 
 import (
+	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/tinternet/databaise/internal/config"
 	"github.com/tinternet/databaise/internal/sqlcommon"
 )
 
-var postgresTestDSN = os.Getenv("TEST_POSTGRES_DSN")
+var postgresTestDSN string
 
 func TestMain(m *testing.M) {
-	os.Exit(m.Run())
+	postgresContainer, err := postgres.Run(context.Background(),
+		"postgres:16-alpine",
+		postgres.WithDatabase("test"),
+		postgres.WithUsername("user"),
+		postgres.WithPassword("password"),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(30*time.Second),
+		),
+	)
+
+	if err != nil {
+		panic(err)
+	}
+
+	postgresTestDSN = postgresContainer.MustConnectionString(context.Background(), "sslmode=disable")
+
+	code := m.Run()
+
+	if err := postgresContainer.Terminate(context.Background()); err != nil {
+		log.Printf("failed to terminate container: %s", err)
+	}
+
+	os.Exit(code)
 }
 
 func openTestConnection(t *testing.T, seed, cleanup string) DB {
