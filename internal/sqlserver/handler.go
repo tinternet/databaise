@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/tinternet/databaise/internal/sqlcommon"
+	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm/clause"
 )
 
 type (
@@ -16,9 +17,13 @@ type (
 	DescribeTableOut = sqlcommon.DescribeTableOut
 	ExecuteQueryIn   = sqlcommon.ExecuteQueryIn
 	ExecuteQueryOut  = sqlcommon.ExecuteQueryOut
-	CreateIndexIn    = sqlcommon.CreateIndexIn
 	CreateIndexOut   = sqlcommon.CreateIndexOut
 )
+
+type CreateIndexIn struct {
+	sqlcommon.CreateIndexIn
+	Clustered bool `json:"clustered" jsonschema:"Whether to create a clustered index,required"`
+}
 
 const listTablesQuery = `
 	SELECT TABLE_SCHEMA as [schema], TABLE_NAME as name
@@ -56,31 +61,33 @@ const listIndexesQuery = `
 	WHERE s.name = CASE @schema WHEN '' THEN s.name ELSE @schema END AND t.name = @table
 `
 
-func ListTables(ctx context.Context, in ListTablesIn, db DB) (*ListTablesOut, error) {
+func ListTables(ctx context.Context, in ListTablesIn, db DB) (ListTablesOut, error) {
 	var out ListTablesOut
-	if err := db.WithContext(ctx).Raw(listTablesQuery, sql.Named("schema", in.Schema)).Scan(&out.Tables).Error; err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return out, db.WithContext(ctx).Raw(listTablesQuery, sql.Named("schema", in.Schema)).Scan(&out.Tables).Error
 }
 
 func DescribeTable(ctx context.Context, in DescribeTableIn, db DB) (*DescribeTableOut, error) {
 	out := DescribeTableOut{Schema: in.Schema, Name: in.Table}
-	if err := db.WithContext(ctx).Raw(listColumnsQuery, sql.Named("schema", in.Schema), sql.Named("table", in.Table)).Scan(&out.Columns).Error; err != nil {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(2)
+	g.Go(func() error {
+		return db.WithContext(ctx).Raw(listColumnsQuery, sql.Named("schema", in.Schema), sql.Named("table", in.Table)).Scan(&out.Columns).Error
+	})
+	g.Go(func() error {
+		return db.WithContext(ctx).Raw(listIndexesQuery, sql.Named("schema", in.Schema), sql.Named("table", in.Table)).Scan(&out.Indexes).Error
+	})
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	if err := db.WithContext(ctx).Raw(listIndexesQuery, sql.Named("schema", in.Schema), sql.Named("table", in.Table)).Scan(&out.Indexes).Error; err != nil {
-		return nil, err
+	if len(out.Columns) == 0 {
+		return nil, sqlcommon.ErrTableNotFound
 	}
 	return &out, nil
 }
 
-func ExecuteQuery(ctx context.Context, in ExecuteQueryIn, db DB) (*ExecuteQueryOut, error) {
+func ExecuteQuery(ctx context.Context, in ExecuteQueryIn, db DB) (ExecuteQueryOut, error) {
 	var out ExecuteQueryOut
-	if err := db.WithContext(ctx).Raw(in.Query).Scan(&out.Rows).Error; err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return out, db.WithContext(ctx).Raw(in.Query).Scan(&out.Rows).Error
 }
 
 func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut, error) {
@@ -91,15 +98,28 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 
 	unique := ""
 	if in.Unique {
-		unique = "UNIQUE "
+		unique = "UNIQUE"
 	}
 
-	tableName := fmt.Sprintf("[%s].[%s]", schema, in.Table)
-	sql := fmt.Sprintf("CREATE %sINDEX %s ON %s (%s)",
-		unique, in.Name, tableName, strings.Join(in.Columns, ", "))
+	clustered := "NONCLUSTERED"
+	if in.Clustered {
+		clustered = "CLUSTERED"
+	}
 
-	if err := db.WithContext(ctx).Exec(sql).Error; err != nil {
+	exprs := make([]clause.Expression, len(in.Columns))
+	for i, col := range in.Columns {
+		exprs[i] = clause.Expr{SQL: "?", Vars: []any{clause.Column{Name: col}}}
+	}
+
+	err := db.WithContext(ctx).Exec(
+		fmt.Sprintf("CREATE %s %s INDEX ? ON ?.? (?)", unique, clustered),
+		clause.Column{Name: in.Name},
+		clause.Table{Name: schema},
+		clause.Table{Name: in.Table},
+		clause.CommaExpression{Exprs: exprs},
+	).Error
+	if err != nil {
 		return &CreateIndexOut{Success: false, Message: err.Error()}, err
 	}
-	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s", in.Name, tableName)}, nil
+	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s.%s", in.Name, schema, in.Name)}, nil
 }

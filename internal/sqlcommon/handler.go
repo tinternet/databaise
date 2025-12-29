@@ -1,6 +1,14 @@
 package sqlcommon
 
-import "gorm.io/gorm"
+import (
+	"errors"
+
+	"gorm.io/gorm"
+)
+
+var (
+	ErrTableNotFound = errors.New("the table does not exist")
+)
 
 // VerifyReadonly executes the given SQL query and checks if the result indicates readonly.
 // The query should return a single boolean value (true = readonly, false = has write perms).
@@ -68,11 +76,11 @@ type ExecuteQueryOut struct {
 
 // CreateIndexIn is the input for the create_index tool.
 type CreateIndexIn struct {
-	Schema  string   `json:"schema,omitempty" jsonschema:"The schema the table is in"`
+	Schema  string   `json:"schema" jsonschema:"The schema the table is in,required"`
 	Table   string   `json:"table" jsonschema:"The table to create the index on,required"`
 	Name    string   `json:"name" jsonschema:"The name of the index,required"`
 	Columns []string `json:"columns" jsonschema:"The columns to include in the index,required"`
-	Unique  bool     `json:"unique,omitempty" jsonschema:"Whether to create a unique index"`
+	Unique  bool     `json:"unique" jsonschema:"Whether to create a unique index,required"`
 }
 
 // CreateIndexOut is the output for the create_index tool.
