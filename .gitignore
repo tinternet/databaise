@@ -33,3 +33,5 @@ go.work.sum
 
 config.yaml
 # cmd/playground
+# Added by goreleaser init:
+dist/
