@@ -277,3 +277,20 @@ func ListSlowestQueries(ctx context.Context, _ struct{}, db DB) (out SlowestQuer
 	err = db.WithContext(ctx).Raw(slowestQueriesSQL).Scan(&out.Queries).Error
 	return
 }
+
+type DeadlocksOut struct {
+	Deadlocks []DeadlockInfo `json:"deadlocks" jsonschema:"List of recent deadlocks"`
+}
+
+type DeadlockInfo struct {
+	DeadlockReport string `json:"deadlock_report" jsonschema:"The XML report of the deadlock"`
+	ExecutionTime  string `json:"execution_time" jsonschema:"The time when the deadlock occurred"`
+}
+
+//go:embed list_deadlocks.sql
+var listDeadlocksSQL string
+
+func ListDeadlocks(ctx context.Context, _ struct{}, db DB) (out DeadlocksOut, err error) {
+	err = db.WithContext(ctx).Raw(listDeadlocksSQL).Scan(&out.Deadlocks).Error
+	return
+}

@@ -72,6 +72,7 @@ func init() {
 	backend.AddAdminTool(&b, "list_missing_indexes", "List missing indexes.", ListMissingIndexes)
 	backend.AddAdminTool(&b, "list_waiting_queries", "List waiting queries.", ListWaitingQueries)
 	backend.AddAdminTool(&b, "list_slowest_queries", "List slowest queries by total elapsed time.", ListSlowestQueries)
+	backend.AddAdminTool(&b, "list_deadlocks", "List recent deadlocks.", ListDeadlocks)
 
 	backend.Register(&b)
 }

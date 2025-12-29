@@ -381,6 +381,16 @@ func TestListSlowestQueries(t *testing.T) {
 	require.Greater(t, len(res.Queries), 0)
 }
 
+func TestListDeadlocks(t *testing.T) {
+	t.Parallel()
+
+	db := openTestConnection(t, "", "")
+
+	_, err := ListDeadlocks(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+	// require.Greater(t, len(res.Deadlocks), 0)
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }
