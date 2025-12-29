@@ -73,8 +73,10 @@ func TestConnectWrite(t *testing.T) {
 		DSN: postgresTestDSN,
 	})
 	t.Cleanup(func() {
-		db, _ := db.DB.DB()
-		db.Close()
+		if db.DB != nil {
+			db, _ := db.DB.DB()
+			db.Close()
+		}
 	})
 	require.NotNil(t, db)
 	require.NoError(t, err)
@@ -323,6 +325,30 @@ func TestReadonlyTransactionEnforcement(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, res)
 	})
+}
+
+func TestDropIndex(t *testing.T) {
+	t.Parallel()
+
+	seed := `
+		CREATE TABLE public.TestDropIndex (
+			ID int,
+			Field1 VARCHAR(50) NOT NULL,
+			Field2 BOOLEAN NOT NULL DEFAULT TRUE,
+			Field3 BIGINT NULL
+		);
+		CREATE INDEX ix_to_drop ON public.TestDropIndex (ID);
+	`
+	cleanup := `DROP TABLE public.TestDropIndex`
+	db := openTestConnection(t, seed, cleanup)
+
+	res, err := DropIndex(t.Context(), sqlcommon.DropIndexIn{
+		Schema: "public",
+		Name:   "ix_to_drop",
+	}, db)
+
+	require.NoError(t, err)
+	require.True(t, res.Success)
 }
 
 func ptr[T any](v T) *T {

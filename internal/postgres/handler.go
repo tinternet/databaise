@@ -20,6 +20,8 @@ type (
 	ExecuteQueryOut  = sqlcommon.ExecuteQueryOut
 	CreateIndexIn    = sqlcommon.CreateIndexIn
 	CreateIndexOut   = sqlcommon.CreateIndexOut
+	DropIndexIn      = sqlcommon.DropIndexIn
+	DropIndexOut     = sqlcommon.DropIndexOut
 )
 
 const listTablesQuery = `
@@ -122,4 +124,22 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 		return &CreateIndexOut{Success: false, Message: err.Error()}, err
 	}
 	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s.%s", in.Name, schema, in.Table)}, nil
+}
+
+func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error) {
+	schema := in.Schema
+	if schema == "" {
+		schema = "public"
+	}
+
+	err := db.WithContext(ctx).Exec(
+		"DROP INDEX ?.? ",
+		clause.Table{Name: schema},
+		clause.Column{Name: in.Name},
+	).Error
+
+	if err != nil {
+		return &DropIndexOut{Success: false, Message: err.Error()}, err
+	}
+	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s.%s", schema, in.Name)}, nil
 }

@@ -32,11 +32,15 @@ type CreateIndexIn struct {
 	Unique  bool     `json:"unique,omitempty" jsonschema:"Whether to create a unique index"`
 }
 
-// Reuse common types where applicable
+type DropIndexIn struct {
+	Name string `json:"name" jsonschema:"The name of the index to drop,required"`
+}
+
 type (
 	ExecuteQueryIn  = sqlcommon.ExecuteQueryIn
 	ExecuteQueryOut = sqlcommon.ExecuteQueryOut
 	CreateIndexOut  = sqlcommon.CreateIndexOut
+	DropIndexOut    = sqlcommon.DropIndexOut
 )
 
 const listTablesQuery = `
@@ -113,4 +117,15 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 		return &CreateIndexOut{Success: false, Message: err.Error()}, err
 	}
 	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s", in.Name, in.Table)}, nil
+}
+
+func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error) {
+	err := db.WithContext(ctx).Exec(
+		"DROP INDEX ?",
+		clause.Column{Name: in.Name},
+	).Error
+	if err != nil {
+		return &DropIndexOut{Success: false, Message: err.Error()}, err
+	}
+	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s", in.Name)}, nil
 }

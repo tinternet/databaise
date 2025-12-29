@@ -88,3 +88,13 @@ type CreateIndexOut struct {
 	Success bool   `json:"success" jsonschema:"Whether the index was created successfully"`
 	Message string `json:"message,omitempty" jsonschema:"A message describing the result"`
 }
+
+type DropIndexIn struct {
+	Schema string `json:"schema" jsonschema:"The schema the index is in,required"`
+	Name   string `json:"name" jsonschema:"The name of the index to drop,required"`
+}
+
+type DropIndexOut struct {
+	Success bool   `json:"success" jsonschema:"Whether the index was dropped successfully"`
+	Message string `json:"message,omitempty" jsonschema:"A message describing the result"`
+}

@@ -68,6 +68,7 @@ func init() {
 	// Admin tools
 	// backend.AddAdminTool(&b, "admin_query", "[T-SQL] Execute administrative SQL (DDL, maintenance).", ExecuteAdmin)
 	backend.AddAdminTool(&b, "create_index", "[T-SQL] Create an index on a table.", CreateIndex)
+	backend.AddAdminTool(&b, "drop_index", "[T-SQL] Drop an index on a table.", DropIndex)
 
 	backend.Register(&b)
 }

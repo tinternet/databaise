@@ -96,6 +96,7 @@ func init() {
 	// Admin tools
 	// backend.AddAdminTool(&b, "admin_query", "[PostgreSQL] Execute administrative SQL (DDL, maintenance).", ExecuteAdmin)
 	backend.AddAdminTool(&b, "create_index", "[PostgreSQL] Create an index on a table.", CreateIndex)
+	backend.AddAdminTool(&b, "drop_index", "[PostgreSQL] Drop an index on a table.", DropIndex)
 
 	backend.Register(&b)
 }

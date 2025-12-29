@@ -281,6 +281,34 @@ func TestCreateIndex(t *testing.T) {
 	})
 }
 
+func TestDropIndex(t *testing.T) {
+	t.Parallel()
+
+	seed := `
+		IF OBJECT_ID('dbo.TestDropIndex ') IS NOT NULL DROP TABLE dbo.TestDropIndex 
+		CREATE TABLE dbo.TestDropIndex (
+			ID int,
+			Field1 VARCHAR(50) NOT NULL,
+			Field2 BIT NOT NULL DEFAULT 1,
+			Field3 BIGINT NULL
+		);
+		CREATE INDEX ix_to_drop ON dbo.TestDropIndex (ID);
+	`
+	cleanup := `DROP TABLE dbo.TestDropIndex`
+	db := openTestConnection(t, seed, cleanup)
+
+	res, err := DropIndex(t.Context(), DropIndexIn{
+		Table: "TestDropIndex",
+		DropIndexIn: sqlcommon.DropIndexIn{
+			Name:   "ix_to_drop",
+			Schema: "dbo",
+		},
+	}, db)
+
+	require.NoError(t, err)
+	require.True(t, res.Success)
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

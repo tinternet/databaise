@@ -18,7 +18,13 @@ type (
 	ExecuteQueryIn   = sqlcommon.ExecuteQueryIn
 	ExecuteQueryOut  = sqlcommon.ExecuteQueryOut
 	CreateIndexOut   = sqlcommon.CreateIndexOut
+	DropIndexOut     = sqlcommon.DropIndexOut
 )
+
+type DropIndexIn struct {
+	sqlcommon.DropIndexIn
+	Table string `json:"table" jsonschema:"The name of the table the index is on,required"`
+}
 
 type CreateIndexIn struct {
 	sqlcommon.CreateIndexIn
@@ -122,4 +128,17 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 		return &CreateIndexOut{Success: false, Message: err.Error()}, err
 	}
 	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s.%s", in.Name, schema, in.Name)}, nil
+}
+
+func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error) {
+	err := db.WithContext(ctx).Exec(
+		"DROP INDEX ? ON ?.?",
+		clause.Column{Name: in.Name},
+		clause.Table{Name: in.Schema},
+		clause.Table{Name: in.Table},
+	).Error
+	if err != nil {
+		return &DropIndexOut{Success: false, Message: err.Error()}, err
+	}
+	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s on %s.%s", in.Name, in.Schema, in.Table)}, nil
 }

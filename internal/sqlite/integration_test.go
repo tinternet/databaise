@@ -232,13 +232,35 @@ func TestCreateIndex(t *testing.T) {
 
 	t.Run("BrokenConnection", func(t *testing.T) {
 		t.Parallel()
-		db := openTestConnection(t, "", "")
+		db := openTestConnection(t, "", os.TempDir()+"/test_broken_connection.db")
 		inner, _ := db.DB()
 		inner.Close()
 		res, err := CreateIndex(t.Context(), CreateIndexIn{}, db)
 		require.False(t, res.Success)
 		require.Error(t, err)
 	})
+}
+
+func TestDropIndex(t *testing.T) {
+	t.Parallel()
+
+	seed := `
+		CREATE TABLE TestDropIndex (
+			ID int,
+			Field1 VARCHAR(50) NOT NULL,
+			Field2 BIT NOT NULL DEFAULT 1,
+			Field3 BIGINT NULL
+		);
+		CREATE INDEX ix_to_drop ON TestDropIndex (ID);
+	`
+	db := openTestConnection(t, seed, os.TempDir()+"/test_drop_index.db")
+
+	res, err := DropIndex(t.Context(), DropIndexIn{
+		Name: "ix_to_drop",
+	}, db)
+
+	require.NoError(t, err)
+	require.True(t, res.Success)
 }
 
 func ptr[T any](v T) *T {
