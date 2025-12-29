@@ -341,6 +341,46 @@ func TestExplainQuery(t *testing.T) {
 	})
 }
 
+func TestListMissingIndexes(t *testing.T) {
+	t.Parallel()
+
+	db := openTestConnection(t, "", "")
+
+	_, err := ListMissingIndexes(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+}
+
+func TestCreateIndex_BrokenConnection(t *testing.T) {
+	t.Parallel()
+
+	db := openTestConnection(t, "", "")
+	inner, _ := db.DB()
+	inner.Close()
+	res, err := CreateIndex(t.Context(), CreateIndexIn{}, db)
+	require.False(t, res.Success)
+	require.Error(t, err)
+}
+
+func TestListWaitingQueries(t *testing.T) {
+	t.Parallel()
+
+	db := openTestConnection(t, "", "")
+
+	res, err := ListWaitingQueries(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+	require.Greater(t, len(res.Queries), 0)
+}
+
+func TestListSlowestQueries(t *testing.T) {
+	t.Parallel()
+
+	db := openTestConnection(t, "", "")
+
+	res, err := ListSlowestQueries(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+	require.Greater(t, len(res.Queries), 0)
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }

@@ -58,8 +58,8 @@ func init() {
 	b := backend.NewBackend("sqlserver", Connector{})
 
 	// Read tools
-	backend.AddReadTool(&b, "list_tables", "[T-SQL] List all tables. Optionally specify a schema (default: dbo).", ListTables)
-	backend.AddReadTool(&b, "describe_table", "[T-SQL] Describe a table's columns and indexes.", DescribeTable)
+	backend.AddReadTool(&b, "list_tables", "List all tables. Optionally specify a schema (default: dbo).", ListTables)
+	backend.AddReadTool(&b, "describe_table", "Describe a table's columns and indexes.", DescribeTable)
 	backend.AddReadTool(&b, "read_query", "[T-SQL] Execute a read-only SQL query.", ExecuteQuery)
 
 	// Write tools
@@ -67,8 +67,11 @@ func init() {
 
 	// Admin tools
 	backend.AddAdminTool(&b, "explain_query", "[T-SQL] Run a query with execution plan enabled.", ExplainQuery)
-	backend.AddAdminTool(&b, "create_index", "[T-SQL] Create an index on a table.", CreateIndex)
-	backend.AddAdminTool(&b, "drop_index", "[T-SQL] Drop an index on a table.", DropIndex)
+	backend.AddAdminTool(&b, "create_index", "Create an index on a table.", CreateIndex)
+	backend.AddAdminTool(&b, "drop_index", "Drop an index on a table.", DropIndex)
+	backend.AddAdminTool(&b, "list_missing_indexes", "List missing indexes.", ListMissingIndexes)
+	backend.AddAdminTool(&b, "list_waiting_queries", "List waiting queries.", ListWaitingQueries)
+	backend.AddAdminTool(&b, "list_slowest_queries", "List slowest queries by total elapsed time.", ListSlowestQueries)
 
 	backend.Register(&b)
 }

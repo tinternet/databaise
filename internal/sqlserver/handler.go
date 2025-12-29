@@ -3,6 +3,7 @@ package sqlserver
 import (
 	"context"
 	"database/sql"
+	_ "embed"
 	"fmt"
 
 	"github.com/tinternet/databaise/internal/sqlcommon"
@@ -207,4 +208,72 @@ func ExplainQuery(ctx context.Context, in ExplainQueryIn, db DB) (*ExplainQueryO
 		return nil, err
 	}
 	return &ExplainQueryOut{Plan: plan, Rows: results}, nil
+}
+
+//go:embed missing_indexes.sql
+var missingIndexesQuery string
+
+type MissingIndexesOut struct {
+	Indexes []IndexRecommendation `json:"indexes" jsonschema:"List of missing indexes with details"`
+}
+
+type IndexRecommendation struct {
+	AverageEstimatedImpact float64 `json:"average_estimated_impact" jsonschema:"The average estimated impact score of the missing index"`
+	CreateStatement        string  `json:"create_statement" jsonschema:"The CREATE INDEX statement to create the missing index"`
+	LastUserSeek           string  `json:"last_user_seek" jsonschema:"The timestamp of the last user seek that would have benefited from the index"`
+	TableName              string  `json:"table_name" jsonschema:"The name of the table on which the index is recommended"`
+}
+
+func ListMissingIndexes(ctx context.Context, _ struct{}, db DB) (out MissingIndexesOut, err error) {
+	err = db.WithContext(ctx).Raw(missingIndexesQuery).Scan(&out.Indexes).Error
+	return
+}
+
+type WaitingQueriesOut struct {
+	Queries []WaitingQuery `json:"queries" jsonschema:"List of currently waiting queries"`
+}
+
+type WaitingQuery struct {
+	StartTime    string `json:"start_time" jsonschema:"The time when the query started execution"`
+	QueryText    string `json:"query_text" jsonschema:"The SQL text of the waiting query"`
+	Status       string `json:"status" jsonschema:"The current status of the query"`
+	Command      string `json:"command" jsonschema:"The command type of the query"`
+	WaitType     string `json:"wait_type" jsonschema:"The type of wait the query is experiencing"`
+	WaitTimeMS   int    `json:"wait_time_ms" jsonschema:"The total wait time in milliseconds"`
+	WaitResource string `json:"wait_resource" jsonschema:"The resource the query is waiting on"`
+	LastWaitType string `json:"last_wait_type" jsonschema:"The last wait type experienced by the query"`
+}
+
+//go:embed list_waiting_queries.sql
+var waitingQueriesSQL string
+
+func ListWaitingQueries(ctx context.Context, _ struct{}, db DB) (out WaitingQueriesOut, err error) {
+	err = db.WithContext(ctx).Raw(waitingQueriesSQL).Scan(&out.Queries).Error
+	return
+}
+
+type SlowestQueriesOut struct {
+	Queries []SlowestQuery `json:"queries" jsonschema:"List of slowest queries by total elapsed time"`
+}
+
+type SlowestQuery struct {
+	StatementText      string `json:"statement_text" jsonschema:"The SQL text of the query"`
+	WaitType           string `json:"wait_type" jsonschema:"The wait type of the query"`
+	CreationTime       string `json:"creation_time" jsonschema:"The time when the query plan was created"`
+	LastExecTime       string `json:"last_execution_time" jsonschema:"The last time the query was executed"`
+	TotalPhysicalReads int    `json:"total_physical_reads" jsonschema:"The total number of physical reads performed by the query"`
+	TotalLogicalReads  int    `json:"total_logical_reads" jsonschema:"The total number of logical reads performed by the query"`
+	TotalLogicalWrites int    `json:"total_logical_writes" jsonschema:"The total number of logical writes performed by the query"`
+	ExecutionCount     int    `json:"execution_count" jsonschema:"The total number of times the query has been executed"`
+	TotalWorkerTime    int    `json:"total_worker_time" jsonschema:"The total worker time in milliseconds consumed by the query"`
+	TotalElapsedTime   int    `json:"total_elapsed_time" jsonschema:"The total elapsed time in milliseconds for the query"`
+	AvgElapsedTime     int    `json:"avg_elapsed_time" jsonschema:"The average elapsed time in milliseconds per execution of the query"`
+}
+
+//go:embed list_slowest_queries.sql
+var slowestQueriesSQL string
+
+func ListSlowestQueries(ctx context.Context, _ struct{}, db DB) (out SlowestQueriesOut, err error) {
+	err = db.WithContext(ctx).Raw(slowestQueriesSQL).Scan(&out.Queries).Error
+	return
 }
