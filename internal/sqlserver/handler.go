@@ -50,23 +50,8 @@ const listColumnsQuery = `
 	ORDER BY ORDINAL_POSITION
 `
 
-const listIndexesQuery = `
-	SELECT
-		i.name as name,
-		'INDEX ON ' + s.name + '.' + t.name + ' (' +
-			STUFF((
-				SELECT ', ' + c.name
-				FROM sys.index_columns ic
-				JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-				WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
-				ORDER BY ic.key_ordinal
-				FOR XML PATH('')
-			), 1, 2, '') + ')' as definition
-	FROM sys.indexes i
-	JOIN sys.tables t ON t.object_id = i.object_id
-	JOIN sys.schemas s ON s.schema_id = t.schema_id
-	WHERE s.name = CASE @schema WHEN '' THEN s.name ELSE @schema END AND t.name = @table
-`
+//go:embed list_indexes.sql
+var listIndexesQuery string
 
 func ListTables(ctx context.Context, in ListTablesIn, db DB) (out ListTablesOut, err error) {
 	err = db.WithContext(ctx).Raw(listTablesQuery, sql.Named("schema", in.Schema)).Scan(&out.Tables).Error
@@ -126,7 +111,7 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 		clause.CommaExpression{Exprs: exprs},
 	).Error
 	if err != nil {
-		return &CreateIndexOut{Success: false, Message: err.Error()}, err
+		return nil, err
 	}
 	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s.%s", in.Name, schema, in.Name)}, nil
 }
@@ -139,7 +124,7 @@ func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error
 		clause.Table{Name: in.Table},
 	).Error
 	if err != nil {
-		return &DropIndexOut{Success: false, Message: err.Error()}, err
+		return nil, err
 	}
 	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s on %s.%s", in.Name, in.Schema, in.Table)}, nil
 }

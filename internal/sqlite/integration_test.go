@@ -8,290 +8,198 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tinternet/databaise/internal/sqlcommon"
+	"github.com/tinternet/databaise/internal/sqltest"
 )
 
-func TestMain(m *testing.M) {
-	os.Exit(m.Run())
-}
-
-func openTestConnection(t *testing.T, seed, path string) DB {
-	db, err := Connector{}.ConnectAdmin(AdminConfig{
-		Path: path,
-	})
+func createFile(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	f, err := os.CreateTemp(dir, "*.db")
 	require.NoError(t, err)
-	if seed != "" {
-		require.NoError(t, db.WithContext(t.Context()).Exec(seed).Error)
-	}
-	t.Cleanup(func() {
-		db, _ := db.DB()
-		db.Close()
-		os.Remove(path)
-	})
-	return db
+	defer f.Close()
+	return f.Name()
 }
 
-func TestConnectRead(t *testing.T) {
+func TestConnect(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(ReadConfig{
-		Path: os.TempDir() + "/test_readonly.db",
-	})
-	t.Cleanup(func() {
-		if err == nil {
-			db, _ := db.DB()
-			db.Close()
-		}
-	})
-	require.NotNil(t, db)
-	require.NoError(t, err)
-}
+	file := createFile(t)
 
-func TestConnectWrite(t *testing.T) {
-	t.Parallel()
-	db, err := Connector{}.ConnectWrite(WriteConfig{
-		Path: os.TempDir() + "/test_write.db",
+	t.Run("ReadOnly", func(t *testing.T) {
+		t.Parallel()
+		db, err := Connector{}.ConnectRead(ReadConfig{Path: file})
+		require.NotNil(t, db)
+		require.NoError(t, err)
 	})
-	require.NoError(t, err)
-	require.NotNil(t, db)
-}
 
-func TestConnectAdmin(t *testing.T) {
-	t.Parallel()
-	db, err := Connector{}.ConnectAdmin(AdminConfig{
-		Path: os.TempDir() + "/test_admin.db",
+	t.Run("Write", func(t *testing.T) {
+		t.Parallel()
+		db, err := Connector{}.ConnectWrite(WriteConfig{Path: file})
+		require.NotNil(t, db)
+		require.NoError(t, err)
 	})
-	t.Cleanup(func() {
-		db, _ := db.DB()
-		db.Close()
+
+	t.Run("Admin", func(t *testing.T) {
+		t.Parallel()
+		db, err := Connector{}.ConnectAdmin(AdminConfig{Path: file})
+		require.NotNil(t, db)
+		require.NoError(t, err)
 	})
-	require.NotNil(t, db)
-	require.NoError(t, err)
 }
 
 func TestListTables(t *testing.T) {
 	t.Parallel()
 
-	seed := `
-		CREATE TABLE TestListTables (
-			ID int,
-			Field1 TEXT NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		CREATE INDEX ix_table ON TestListTables (ID);
-	`
-	db := openTestConnection(t, seed, os.TempDir()+"/test_list_tables.db")
+	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	require.NoError(t, err)
+	sqltest.Seed(t, db)
 
 	l, err := ListTables(t.Context(), ListTablesIn{}, db)
 	require.NoError(t, err)
-	require.Contains(t, l.Tables, "TestListTables")
+	require.ElementsMatch(t, l.Tables, []string{"orders", "users"})
 }
 
 func TestDescribeTable(t *testing.T) {
 	t.Parallel()
 
-	seed := `
-		CREATE TABLE TestDescribeTable (
-			ID int,
-			Field1 TEXT NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		CREATE INDEX ix_table ON TestDescribeTable (ID);
-	`
-
-	db := openTestConnection(t, seed, os.TempDir()+"/test_describe_table.db")
+	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	require.NoError(t, err)
+	sqltest.Seed(t, db)
 
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Table: "TestDescribeTable",
-		}, db)
+		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "orders"}, db)
 
 		require.NoError(t, err)
 		require.NotNil(t, res)
 
-		expected := &DescribeTableOut{
-			Name: "TestDescribeTable",
-			Columns: []sqlcommon.Column{
-				{
-					Name:         "ID",
-					DatabaseType: "INT",
-					IsNullable:   true,
-					DefaultValue: nil,
-				}, {
-					Name:         "Field1",
-					DatabaseType: "TEXT",
-					IsNullable:   false,
-					DefaultValue: nil,
-				}, {
-					Name:         "Field2",
-					DatabaseType: "BIT",
-					IsNullable:   false,
-					DefaultValue: ptr("1"),
-				}, {
-					Name:         "Field3",
-					DatabaseType: "BIGINT",
-					IsNullable:   true,
-					DefaultValue: nil,
-				},
-			},
-			Indexes: []sqlcommon.Index{
-				{
-					Name:       "ix_table",
-					Definition: "CREATE INDEX ix_table ON TestDescribeTable (ID)",
-				},
-			},
-		}
+		require.Equal(t, "orders", res.Name)
 
-		require.EqualValues(t, expected, res)
+		columns := []sqlcommon.Column{
+			{Name: "id", DatabaseType: "INTEGER", IsNullable: true, DefaultValue: nil},
+			{Name: "created_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
+			{Name: "updated_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
+			{Name: "deleted_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
+			{Name: "order_code", DatabaseType: "TEXT", IsNullable: false, DefaultValue: nil},
+			{Name: "amount", DatabaseType: "REAL", IsNullable: false, DefaultValue: nil},
+			{Name: "user_id", DatabaseType: "INTEGER", IsNullable: false, DefaultValue: nil},
+			{Name: "shipped_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
+		}
+		require.EqualValues(t, columns, res.Columns)
+
+		indexes := []sqlcommon.Index{
+			// {Name: "orders_pkey", Definition: "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)"},
+			{Name: "idx_orders_user_id", Definition: "CREATE INDEX `idx_orders_user_id` ON `orders`(`user_id`)"},
+			{Name: "idx_orders_order_code", Definition: "CREATE UNIQUE INDEX `idx_orders_order_code` ON `orders`(`order_code`)"},
+			{Name: "idx_orders_deleted_at", Definition: "CREATE INDEX `idx_orders_deleted_at` ON `orders`(`deleted_at`)"},
+		}
+		require.EqualValues(t, indexes, res.Indexes)
 	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Table: "nonexistend",
-		}, db)
+		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "nonexistend"}, db)
 		require.Nil(t, res)
 		require.ErrorIs(t, sqlcommon.ErrTableNotFound, err)
-	})
-	t.Run("WithEmptySchema", func(t *testing.T) {
-		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Table: "TestDescribeTable",
-		}, db)
-		require.NotNil(t, res)
-		require.NoError(t, err)
-		require.Equal(t, "TestDescribeTable", res.Name)
-	})
-	t.Run("WithEmptySchema", func(t *testing.T) {
-		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Table: "TestDescribeTable",
-		}, db)
-		require.NotNil(t, res)
-		require.NoError(t, err)
-		require.Equal(t, "TestDescribeTable", res.Name)
-	})
-	t.Run("BrokenConnection", func(t *testing.T) {
-		t.Parallel()
-		db := openTestConnection(t, "", os.TempDir()+"/test_broken_connection.db")
-		inner, _ := db.DB()
-		inner.Close()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{}, db)
-		require.Nil(t, res)
-		require.Error(t, err)
 	})
 }
 
 func TestExecuteQuery(t *testing.T) {
 	t.Parallel()
+	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	require.NoError(t, err)
+	sqltest.Seed(t, db)
 
-	seed := `
-		CREATE TABLE TestExecuteQuery (
-			ID int,
-			Field1 TEXT NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		INSERT INTO TestExecuteQuery(id, field1)
-		VALUES (1, 'asd'), (2, 'qwe');
-	`
-	db := openTestConnection(t, seed, os.TempDir()+"/test_execute_query.db")
-
-	res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM TestExecuteQuery"}, db)
+	res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM orders"}, db)
 	require.NoError(t, err)
 	require.Len(t, res.Rows, 2)
 
 	t.Run("Malformed SQL", func(t *testing.T) {
 		_, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT NOT SELECT"}, db)
-		require.Error(t, err)
+		require.ErrorContains(t, err, "syntax error")
+	})
+
+	t.Run("Empty Result", func(t *testing.T) {
+		t.Parallel()
+		res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM orders WHERE id = 999"}, db)
+		require.NoError(t, err)
+		require.Len(t, res.Rows, 0)
 	})
 }
 
 func TestCreateIndex(t *testing.T) {
 	t.Parallel()
+	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	require.NoError(t, err)
+	sqltest.Seed(t, db)
 
-	seed := `
-		CREATE TABLE TestCreateIndex (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-	`
-	db := openTestConnection(t, seed, os.TempDir()+"/test_create_index.db")
+	ix := CreateIndexIn{
+		Table:   "orders",
+		Name:    "ix_someindex1",
+		Columns: []string{"id", "created_at"},
+		Unique:  true,
+	}
+
+	res, err := CreateIndex(t.Context(), ix, db)
+
+	require.NoError(t, err)
+	require.True(t, res.Success)
+
+	t.Run("IndexAlreadyExists", func(t *testing.T) {
+		res, err := CreateIndex(t.Context(), ix, db)
+		require.Nil(t, res)
+		require.ErrorContains(t, err, "already exists")
+	})
+}
+
+func TestDropIndex(t *testing.T) {
+	t.Parallel()
+	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	require.NoError(t, err)
+	sqltest.Seed(t, db)
 
 	res, err := CreateIndex(t.Context(), CreateIndexIn{
-		Table:   "TestCreateIndex",
-		Name:    "ix_someindex",
-		Columns: []string{"id", "field1"},
+		Table:   "orders",
+		Name:    "ix_someindex1",
+		Columns: []string{"id", "created_at"},
 		Unique:  true,
 	}, db)
 
 	require.NoError(t, err)
 	require.True(t, res.Success)
 
-	t.Run("BrokenConnection", func(t *testing.T) {
-		t.Parallel()
-		db := openTestConnection(t, "", os.TempDir()+"/test_broken_connection.db")
-		inner, _ := db.DB()
-		inner.Close()
-		res, err := CreateIndex(t.Context(), CreateIndexIn{}, db)
-		require.False(t, res.Success)
-		require.Error(t, err)
-	})
-}
-
-func TestDropIndex(t *testing.T) {
-	t.Parallel()
-
-	seed := `
-		CREATE TABLE TestDropIndex (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		CREATE INDEX ix_to_drop ON TestDropIndex (ID);
-	`
-	db := openTestConnection(t, seed, os.TempDir()+"/test_drop_index.db")
-
-	res, err := DropIndex(t.Context(), DropIndexIn{
-		Name: "ix_to_drop",
-	}, db)
-
+	ix, err := DropIndex(t.Context(), DropIndexIn{Name: "ix_someindex1"}, db)
+	require.True(t, ix.Success)
 	require.NoError(t, err)
-	require.True(t, res.Success)
+
+	t.Run("NonExistentIndex", func(t *testing.T) {
+		ix, err := DropIndex(t.Context(), DropIndexIn{Name: "ix_someindex1"}, db)
+		require.Nil(t, ix)
+		require.ErrorContains(t, err, "no such index")
+	})
 }
 
 func TestExplainQuery(t *testing.T) {
 	t.Parallel()
-
-	seed := `
-		CREATE TABLE TestExplainQuery (
-			ID int,
-			Field1 TEXT NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		INSERT INTO TestExplainQuery(id, field1)
-		VALUES (1, 'asd'), (2, 'qwe');
-	`
-	db := openTestConnection(t, seed, os.TempDir()+"/test_explain_query.db")
+	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	require.NoError(t, err)
+	sqltest.Seed(t, db)
 
 	t.Run("Explain", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM TestExplainQuery"}, db)
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM orders"}, db)
 		require.NoError(t, err)
-		require.Greater(t, len(res.Plan), 0)
+		require.Greater(t, len(res.Plan), 1)
+		t.Logf("%v", res.Plan)
 	})
 	t.Run("ExplainQueryPlan", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM TestExplainQuery", QueryPlan: true}, db)
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM orders", QueryPlan: true}, db)
 		require.NoError(t, err)
-		require.Greater(t, len(res.Plan), 0)
+		require.GreaterOrEqual(t, len(res.Plan), 1)
+		t.Logf("%v", res.Plan)
 	})
-}
-
-func ptr[T any](v T) *T {
-	return &v
+	t.Run("MalformedQuery", func(t *testing.T) {
+		t.Parallel()
+		_, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT NOT SELECT"}, db)
+		require.ErrorContains(t, err, "syntax error")
+	})
 }

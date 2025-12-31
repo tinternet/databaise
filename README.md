@@ -80,14 +80,17 @@ Tools are registered based on which config sections are present:
 | `write` | *Planned* |
 | `admin` | `{db}_create_index`, `{db}_drop_index`, `{db}_explain_query` |
 
+**Backend-Specific Admin Tools**
+
+If the backend type is `sqlserver`, the admin section includes these additional diagnostic tools:
+
+- `sqlserver_list_missing_indexes` - identify indexes suggested by the query optimizer
+- `sqlserver_list_waiting_queries` - inspect queries currently blocked or waiting
+- `sqlserver_list_slowest_queries` - retrieve top resource-consuming queries
+- `sqlserver_list_deadlocks` - analyze recent deadlock events
+
 **Global tools:**
 - `list_databases` - List all configured databases with their available tools
-
-**Example:** If you configure `netflix` with `read` and `admin` sections, these tools become available:
-- `netflix_list_tables`
-- `netflix_describe_table`
-- `netflix_read_query`
-- `netflix_create_index`
 
 ## Security Model
 
@@ -99,13 +102,9 @@ Tools are registered based on which config sections are present:
 
 Planned tools and features:
 
-**Write tools** - Insert, update, and delete operations (approach TBD - considering ORM-style `insert_record`/`update_record`/`delete_record` vs raw `write_query`)
+- **Write tools** - Insert, update, and delete operations (approach TBD - considering ORM-style `insert_record`/`update_record`/`delete_record` vs raw `write_query`)
 
-**Admin tools:**
-- `{db}_slow_queries` - Get slowest queries from database logs/stats
-
-**Other:**
-- MySQL support
+- **MySQL support**
 
 ## License
 

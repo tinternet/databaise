@@ -114,7 +114,7 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 		clause.CommaExpression{Exprs: exprs},
 	).Error
 	if err != nil {
-		return &CreateIndexOut{Success: false, Message: err.Error()}, err
+		return nil, err
 	}
 	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s", in.Name, in.Table)}, nil
 }
@@ -125,7 +125,7 @@ func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error
 		clause.Column{Name: in.Name},
 	).Error
 	if err != nil {
-		return &DropIndexOut{Success: false, Message: err.Error()}, err
+		return nil, err
 	}
 	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s", in.Name)}, nil
 }

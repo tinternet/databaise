@@ -1,145 +1,88 @@
 package provision
 
 import (
-	"bytes"
-	_ "embed"
+	"context"
 	"fmt"
-	"net/url"
 	"strings"
-	"text/template"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-//go:embed postgres_provision.sql
-var postgresProvisionSQL string
-
-//go:embed postgres_revoke.sql
-var postgresRevokeSQL string
-
-var postgresProvisionTmpl = template.Must(template.New("postgres_provision").Parse(postgresProvisionSQL))
-var postgresRevokeTmpl = template.Must(template.New("postgres_revoke").Parse(postgresRevokeSQL))
-
-type postgresProvisioner struct{}
-
-func init() {
-	Register("postgres", &postgresProvisioner{})
+type PostgresProvisioner struct {
+	db *gorm.DB
 }
 
-func (p *postgresProvisioner) Provision(adminDSN string, opts Options) (*Result, error) {
-	if len(opts.Schemas) == 0 {
-		return nil, fmt.Errorf("at least one schema must be specified")
-	}
-
-	db, err := gorm.Open(postgres.Open(adminDSN), &gorm.Config{})
+func (p *PostgresProvisioner) Connect(dsn string) error {
+	db, err := gorm.Open(postgres.Open(dsn))
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+		return err
 	}
-
-	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
-
-	username := opts.Username
-	if username == "" {
-		username = GenerateUsername()
-	}
-	password := opts.Password
-	if password == "" {
-		password = GeneratePassword()
-	}
-
-	var buf bytes.Buffer
-	if err := postgresProvisionTmpl.Execute(&buf, map[string]any{
-		"Username": username,
-		"Password": password,
-		"Schemas":  opts.Schemas,
-		"Update":   opts.Update,
-	}); err != nil {
-		return nil, fmt.Errorf("failed to render provision script: %w", err)
-	}
-
-	if err := db.Exec(buf.String()).Error; err != nil {
-		return nil, fmt.Errorf("failed to provision user: %w", err)
-	}
-
-	readonlyDSN, err := replacePostgresCredentials(adminDSN, username, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build readonly DSN: %w", err)
-	}
-
-	return &Result{
-		User:     username,
-		Password: password,
-		DSN:      readonlyDSN,
-		Grants:   []string{buf.String()},
-	}, nil
-}
-
-func (p *postgresProvisioner) Revoke(adminDSN string, username string) error {
-	db, err := gorm.Open(postgres.Open(adminDSN), &gorm.Config{})
-	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
-	}
-
-	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
-
-	// Get all user schemas for revoking default privileges
-	var schemas []string
-	db.Raw(`SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname != 'information_schema'`).Scan(&schemas)
-
-	var buf bytes.Buffer
-	if err := postgresRevokeTmpl.Execute(&buf, map[string]any{
-		"Username": username,
-		"Schemas":  schemas,
-	}); err != nil {
-		return fmt.Errorf("failed to render revoke script: %w", err)
-	}
-
-	if err := db.Exec(buf.String()).Error; err != nil {
-		return fmt.Errorf("failed to revoke user: %w", err)
-	}
-
+	p.db = db
 	return nil
 }
 
-// replacePostgresCredentials replaces user/password in a postgres DSN.
-// Handles both URL format (postgres://user:pass@host/db) and key=value format.
-func replacePostgresCredentials(dsn, newUser, newPassword string) (string, error) {
-	// Try URL format first
-	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
-		u, err := url.Parse(dsn)
-		if err != nil {
-			return "", err
+func (p *PostgresProvisioner) Close() error {
+	db, err := p.db.DB()
+	if err != nil {
+		return err
+	}
+	return db.Close()
+}
+
+func (p *PostgresProvisioner) DropUser(ctx context.Context, user string) error {
+	err := p.db.WithContext(ctx).Exec(fmt.Sprintf("DROP OWNED BY %s", user)).Error
+	if err != nil {
+		return err
+	}
+	return p.db.WithContext(ctx).Exec(fmt.Sprintf("DROP USER IF EXISTS %s", user)).Error
+}
+
+func (p *PostgresProvisioner) UserExists(ctx context.Context, user string) (*bool, error) {
+	var exists bool
+	err := p.db.WithContext(ctx).Raw("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ?);", user).First(&exists).Error
+	if err != nil {
+		return nil, err
+	}
+	return &exists, nil
+}
+
+func (p *PostgresProvisioner) CreateUser(ctx context.Context, user, pass string) error {
+	err := p.db.WithContext(ctx).Exec(fmt.Sprintf("CREATE USER %s WITH PASSWORD '%s'", user, pass)).Error
+	if err != nil {
+		return err
+	}
+	return p.db.WithContext(ctx).Exec(fmt.Sprintf("ALTER USER %s SET default_transaction_read_only = on;", user)).Error
+}
+
+func (p *PostgresProvisioner) GrantReadOnly(ctx context.Context, user string, scope AccessScope) error {
+	if len(scope.Groups) > 0 {
+		if err := p.grantSchemas(ctx, user, scope.Groups); err != nil {
+			return err
 		}
-		u.User = url.UserPassword(newUser, newPassword)
-		return u.String(), nil
 	}
-
-	// Key=value format: user=x password=y host=z ...
-	parts := strings.Fields(dsn)
-	var result []string
-	hasUser, hasPassword := false, false
-
-	for _, part := range parts {
-		if strings.HasPrefix(part, "user=") {
-			result = append(result, fmt.Sprintf("user=%s", newUser))
-			hasUser = true
-		} else if strings.HasPrefix(part, "password=") {
-			result = append(result, fmt.Sprintf("password=%s", newPassword))
-			hasPassword = true
-		} else {
-			result = append(result, part)
+	if len(scope.Resources) > 0 {
+		if err := p.grantTables(ctx, user, scope.Resources); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	if !hasUser {
-		result = append(result, fmt.Sprintf("user=%s", newUser))
+func (p *PostgresProvisioner) grantTables(ctx context.Context, user string, tables []string) error {
+	var query strings.Builder
+	for _, table := range tables {
+		fmt.Fprintf(&query, "GRANT SELECT ON %s TO %s;\n", table, user)
 	}
-	if !hasPassword {
-		result = append(result, fmt.Sprintf("password=%s", newPassword))
-	}
+	return p.db.WithContext(ctx).Exec(query.String()).Error
+}
 
-	return strings.Join(result, " "), nil
+func (p *PostgresProvisioner) grantSchemas(ctx context.Context, user string, schemas []string) error {
+	var query strings.Builder
+	for _, schema := range schemas {
+		fmt.Fprintf(&query, "GRANT USAGE ON SCHEMA %s TO %s;\n", schema, user)
+		fmt.Fprintf(&query, "GRANT SELECT ON ALL TABLES IN SCHEMA %s TO %s;\n", schema, user)
+		fmt.Fprintf(&query, "ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT SELECT ON TABLES TO %s;\n", schema, user)
+	}
+	return p.db.WithContext(ctx).Exec(query.String()).Error
 }

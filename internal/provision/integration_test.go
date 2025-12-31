@@ -3,90 +3,156 @@
 package provision
 
 import (
-	"net/url"
-	"os"
-	"regexp"
+	"context"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"gorm.io/gorm"
 )
 
-// Environment variables for test DSNs.
-// Tests expect these databases to exist and be empty (or droppable tables).
-var (
-	postgresTestDSN  = os.Getenv("TEST_POSTGRES_DSN")
-	mysqlTestDSN     = os.Getenv("TEST_MYSQL_DSN")
-	sqlserverTestDSN = os.Getenv("TEST_MSSQL_DSN")
-)
-
-// testDBName extracts or derives the database name from a DSN for use in provisioning.
-var (
-	postgresTestDBName  string
-	mysqlTestDBName     string
-	sqlserverTestDBName string
-)
-
-// closeAndWait closes the database connection and waits briefly for the server to release it.
-func closeAndWait(db *gorm.DB) {
-	sqlDB, _ := db.DB()
-	sqlDB.Close()
-	time.Sleep(100 * time.Millisecond)
+type TestData struct {
+	ID   uint `gorm:"primaryKey"`
+	Text string
 }
 
-// extractPostgresDBName extracts the database name from a postgres DSN.
-func extractPostgresDBName(dsn string) string {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimPrefix(u.Path, "/")
+type TestDataSecret struct {
+	ID   uint `gorm:"primaryKey"`
+	Text string
 }
 
-// extractMySQLDBName extracts the database name from a MySQL DSN.
-func extractMySQLDBName(dsn string) string {
-	// Format: user:password@tcp(host:port)/dbname?params
-	re := regexp.MustCompile(`/([^/?]+)(\?|$)`)
-	if matches := re.FindStringSubmatch(dsn); len(matches) > 1 {
-		return matches[1]
-	}
-	return ""
+func migrateGormDatabase(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	err := db.Migrator().AutoMigrate(TestData{}, TestDataSecret{})
+	require.NoError(t, err)
+
+	err = db.Create([]*TestData{{ID: 1}, {ID: 2}}).Error
+	require.NoError(t, err)
+
+	err = db.Create([]*TestDataSecret{{ID: 1}, {ID: 2}}).Error
+	require.NoError(t, err)
 }
 
-// extractSQLServerDBName extracts the database name from a SQL Server DSN.
-func extractSQLServerDBName(dsn string) string {
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return ""
+func testReadonlySchemaScope(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	// Test select
+	count, err := gorm.G[TestData](db).Count(t.Context(), "id")
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count)
+
+	count, err = gorm.G[TestDataSecret](db).Count(t.Context(), "id")
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count)
+
+	// Test update
+	_, err = gorm.G[TestData](db).Where("1 = 1").Update(t.Context(), "text", "text")
+	require.Error(t, err)
+	_, err = gorm.G[TestDataSecret](db).Where("1 = 1").Update(t.Context(), "text", "text")
+	require.Error(t, err)
+
+	// Test insert
+	err = db.Create([]*TestData{{ID: 4}, {ID: 5}}).Error
+	require.Error(t, err)
+
+	err = db.Create([]*TestDataSecret{{ID: 4}, {ID: 5}}).Error
+	require.Error(t, err)
+
+	// Test delete
+	_, err = gorm.G[TestData](db).Delete(t.Context())
+	require.Error(t, err)
+	_, err = gorm.G[TestDataSecret](db).Delete(t.Context())
+	require.Error(t, err)
+
+	// Test DDL
+	type NewTable struct {
+		ID uint `gorm:"primaryKey"`
 	}
-	return u.Query().Get("database")
+	err = db.Migrator().AutoMigrate(&NewTable{})
+	require.Error(t, err)
+
+	err = db.Migrator().DropTable(&TestData{})
+	require.Error(t, err)
+
+	err = db.Migrator().AddColumn(&TestData{}, "new_col")
+	require.Error(t, err)
+
+	err = db.Migrator().DropColumn(&TestData{}, "text")
+	require.Error(t, err)
+
+	err = db.Migrator().CreateIndex(&TestData{}, "idx_test_data_text")
+	require.Error(t, err)
 }
 
-func TestMain(m *testing.M) {
-	// Extract database names from DSNs
-	if postgresTestDSN != "" {
-		postgresTestDBName = extractPostgresDBName(postgresTestDSN)
-	}
-	if mysqlTestDSN != "" {
-		mysqlTestDBName = extractMySQLDBName(mysqlTestDSN)
-	}
-	if sqlserverTestDSN != "" {
-		sqlserverTestDBName = extractSQLServerDBName(sqlserverTestDSN)
-	}
+func testBadInputs(t *testing.T, provisioner Provisioner, dsn string) {
+	t.Helper()
+	require.NoError(t, provisioner.Connect(dsn))
 
-	// Setup test tables
-	setupPostgres()
-	setupMySQL()
-	setupSQLServer()
+	// Bad credentials
+	require.Error(t, provisioner.CreateUser(t.Context(), "", ""))
+	require.Error(t, provisioner.CreateUser(t.Context(), "user", ""))
+	require.Error(t, provisioner.CreateUser(t.Context(), "", "pass"))
 
-	// Run tests
-	code := m.Run()
+	// Bad access groups
+	password, err := GeneratePassword()
+	require.NoError(t, err)
+	require.NoError(t, provisioner.CreateUser(t.Context(), "testuser", password))
+	require.Error(t, provisioner.GrantReadOnly(t.Context(), "testuser", AccessScope{
+		Groups:    []string{"'"},
+		Resources: []string{"'"},
+	}))
+	require.Error(t, provisioner.GrantReadOnly(t.Context(), "testuser", AccessScope{
+		Groups:    []string{"public"},
+		Resources: []string{"'"},
+	}))
 
-	// Cleanup test tables
-	cleanupPostgres()
-	cleanupMySQL()
-	cleanupSQLServer()
+	// For coverage
+	require.NoError(t, provisioner.Close())
+	require.NoError(t, provisioner.Close())
 
-	os.Exit(code)
+	_, err = provisioner.UserExists(t.Context(), "'")
+	require.Error(t, err)
+
+	require.Error(t, provisioner.DropUser(t.Context(), "user"))
+	require.Error(t, provisioner.CreateUser(t.Context(), "user", "qweewqe"))
+	require.Error(t, provisioner.Connect("fjdhfjdshfj"))
+}
+
+func testDropUser(t *testing.T, provisioner Provisioner, dsn string) {
+	require.NoError(t, provisioner.Connect(dsn))
+	password, err := GeneratePassword()
+	require.NoError(t, err)
+	require.NoError(t, provisioner.CreateUser(t.Context(), "testuser", password))
+	require.NoError(t, provisioner.GrantReadOnly(t.Context(), "testuser", AccessScope{
+		Groups:    []string{},
+		Resources: []string{},
+	}))
+
+	exists, err := provisioner.UserExists(t.Context(), "testuser")
+	require.NoError(t, err)
+	require.True(t, *exists)
+
+	err = provisioner.DropUser(t.Context(), "testuser")
+	require.NoError(t, err)
+
+	exists, err = provisioner.UserExists(t.Context(), "testuser")
+	require.NoError(t, err)
+	require.False(t, *exists)
+}
+
+func setupMySqlContainer(t *testing.T) string {
+	t.Helper()
+	mysqlContainer, err := mysql.Run(context.Background(),
+		"mysql:9.5",
+		testcontainers.WithEnv(map[string]string{"MYSQL_ROOT_PASSWORD": "test"}),
+	)
+	testcontainers.CleanupContainer(t, mysqlContainer)
+	require.NoError(t, err)
+	dsn, err := mysqlContainer.ConnectionString(t.Context())
+	require.NoError(t, err)
+	dsn = strings.Replace(dsn, "test", "root", 1)
+	return dsn + "?multiStatements=true"
 }

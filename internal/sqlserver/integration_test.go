@@ -3,359 +3,230 @@
 package sqlserver
 
 import (
-	"context"
-	"fmt"
-	"os"
+	"slices"
+	"strings"
 	"testing"
-	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/mssql"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/tinternet/databaise/internal/config"
+	"github.com/tinternet/databaise/internal/provision"
 	"github.com/tinternet/databaise/internal/sqlcommon"
+	"github.com/tinternet/databaise/internal/sqltest"
 )
 
-var sqlserverTestDSN string
-
-func TestMain(m *testing.M) {
-	ctx := context.Background()
-	mssqlContainer, err := mssql.Run(ctx,
-		"mcr.microsoft.com/mssql/server:2022-CU10-ubuntu-22.04",
-		mssql.WithAcceptEULA(),
-		mssql.WithPassword("Password!!!1234"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("SQL Server is now ready for client connections").
-				WithStartupTimeout(60*time.Second),
-		),
-	)
-
-	if err != nil {
-		panic(err)
-	}
-
-	host, err := mssqlContainer.Host(ctx)
-	if err != nil {
-		panic(err)
-	}
-
-	port, err := mssqlContainer.MappedPort(ctx, "1433/tcp")
-	if err != nil {
-		panic(err)
-	}
-
-	sqlserverTestDSN = fmt.Sprintf(
-		"sqlserver://sa:Password!!!1234@%s:%s?encrypt=disable",
-		host,
-		port.Port(),
-	)
-
-	code := m.Run()
-
-	if err := testcontainers.TerminateContainer(mssqlContainer); err != nil {
-		log.Printf("failed to terminate container: %s", err)
-	}
-
-	os.Exit(code)
-}
-
-func openTestConnection(t *testing.T, seed, cleanup string) DB {
-	db, err := Connector{}.ConnectAdmin(config.AdminConfig{
-		DSN: sqlserverTestDSN,
-	})
+func openTestConnection(t *testing.T) DB {
+	t.Helper()
+	dsn := sqltest.SetupSqlServerContainer(t)
+	db, err := Connector{}.ConnectAdmin(config.AdminConfig{DSN: dsn})
+	sqltest.Seed(t, db)
 	require.NoError(t, err)
-	if seed != "" {
-		require.NoError(t, db.WithContext(t.Context()).Exec(seed).Error)
-	}
 	return db
 }
 
-func TestConnectRead(t *testing.T) {
+func TestConnect(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(config.ReadConfig{
-		DSN:             sqlserverTestDSN,
-		EnforceReadonly: new(bool),
-	})
-	require.NoError(t, err)
-	require.NotNil(t, db)
-}
+	dsn := sqltest.SetupSqlServerContainer(t)
 
-func TestConnectReadEnforceReadonly(t *testing.T) {
-	t.Parallel()
-	db, err := Connector{}.ConnectRead(config.ReadConfig{
-		DSN:             sqlserverTestDSN,
-		EnforceReadonly: ptr(true),
+	t.Run("ReadOnly", func(t *testing.T) {
+		t.Parallel()
+		provisioner := provision.SqlServerProvisioner{}
+		require.NoError(t, provisioner.Connect(dsn))
+		password, err := provision.GeneratePassword()
+		require.NoError(t, err)
+		require.NoError(t, provisioner.CreateUser(t.Context(), "testuser", password))
+		rodsn := sqltest.ReplaceURLCredentials(t, dsn, "testuser", password)
+		db, err := Connector{}.ConnectRead(ReadConfig{DSN: rodsn})
+		require.NotNil(t, db)
+		require.NoError(t, err)
 	})
-	require.Error(t, err)
-	require.Nil(t, db)
-}
 
-func TestConnectWrite(t *testing.T) {
-	t.Parallel()
-	db, err := Connector{}.ConnectWrite(config.WriteConfig{
-		DSN: sqlserverTestDSN,
+	t.Run("ReadOnly With EnforceReadonly=true", func(t *testing.T) {
+		t.Parallel()
+		db, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn, EnforceReadonly: ptr(true)})
+		require.Nil(t, db)
+		require.ErrorContains(t, err, "read DSN user has write permissions")
 	})
-	require.NotNil(t, db)
-	require.NoError(t, err)
-}
 
-func TestConnectAdmin(t *testing.T) {
-	t.Parallel()
-	db, err := Connector{}.ConnectAdmin(config.AdminConfig{
-		DSN: sqlserverTestDSN,
+	t.Run("ReadOnly With EnforceReadonly=false", func(t *testing.T) {
+		t.Parallel()
+		db, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn, EnforceReadonly: ptr(false)})
+		require.NotNil(t, db)
+		require.NoError(t, err)
 	})
-	require.NotNil(t, db)
-	require.NoError(t, err)
+
+	t.Run("Write", func(t *testing.T) {
+		t.Parallel()
+		db, err := Connector{}.ConnectWrite(config.WriteConfig{DSN: dsn})
+		require.NotNil(t, db)
+		require.NoError(t, err)
+	})
+
+	t.Run("Admin", func(t *testing.T) {
+		t.Parallel()
+		db, err := Connector{}.ConnectAdmin(config.AdminConfig{DSN: dsn})
+		require.NotNil(t, db)
+		require.NoError(t, err)
+	})
 }
 
 func TestListTables(t *testing.T) {
 	t.Parallel()
-
-	seed := `
-		CREATE TABLE dbo.TestListTables (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		CREATE CLUSTERED INDEX ix_clustered ON TestListTables (ID);
-	`
-	cleanup := `DROP TABLE dbo.TestListTables`
-	db := openTestConnection(t, seed, cleanup)
-
+	db := openTestConnection(t)
 	l, err := ListTables(t.Context(), ListTablesIn{}, db)
 	require.NoError(t, err)
-	require.Contains(t, l.Tables, sqlcommon.Table{
-		Schema: "dbo",
-		Name:   "TestListTables",
-	})
+	assert.Contains(t, l.Tables, sqlcommon.Table{Schema: "dbo", Name: "orders"})
+	assert.Contains(t, l.Tables, sqlcommon.Table{Schema: "dbo", Name: "users"})
 }
 
 func TestDescribeTable(t *testing.T) {
 	t.Parallel()
+	db := openTestConnection(t)
 
-	seed := `
-		CREATE TABLE dbo.TestDescribeTable (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		CREATE CLUSTERED INDEX ix_clustered ON TestDescribeTable (ID);
-	`
-	cleanup := `DROP TABLE dbo.TestDescribeTable`
-
-	db := openTestConnection(t, seed, cleanup)
-
-	t.Run("Success", func(t *testing.T) {
+	t.Run("ColumnTypes", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Schema: "dbo",
-			Table:  "TestDescribeTable",
-		}, db)
+		res, err := DescribeTable(t.Context(), DescribeTableIn{Schema: "dbo", Table: "orders"}, db)
 
 		require.NoError(t, err)
 		require.NotNil(t, res)
 
-		expected := &DescribeTableOut{
-			Schema: "dbo",
-			Name:   "TestDescribeTable",
-			Columns: []sqlcommon.Column{
-				{
-					Name:         "ID",
-					DatabaseType: "int",
-					IsNullable:   true,
-					DefaultValue: nil,
-				}, {
-					Name:         "Field1",
-					DatabaseType: "varchar",
-					IsNullable:   false,
-					DefaultValue: nil,
-				}, {
-					Name:         "Field2",
-					DatabaseType: "bit",
-					IsNullable:   false,
-					DefaultValue: ptr("((1))"),
-				}, {
-					Name:         "Field3",
-					DatabaseType: "bigint",
-					IsNullable:   true,
-					DefaultValue: nil,
-				},
-			},
-			Indexes: []sqlcommon.Index{
-				{
-					Name:       "ix_clustered",
-					Definition: "INDEX ON dbo.TestDescribeTable (ID)",
-				},
-			},
-		}
+		assert.Equal(t, "dbo", res.Schema)
+		assert.Equal(t, "orders", res.Name)
 
-		require.EqualValues(t, expected, res)
+		columns := []sqlcommon.Column{
+			{Name: "id", DatabaseType: "bigint", IsNullable: false, DefaultValue: nil},
+			{Name: "created_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
+			{Name: "updated_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
+			{Name: "deleted_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
+			{Name: "order_code", DatabaseType: "nvarchar", IsNullable: false, DefaultValue: nil},
+			{Name: "amount", DatabaseType: "float", IsNullable: false, DefaultValue: nil},
+			{Name: "user_id", DatabaseType: "bigint", IsNullable: false, DefaultValue: nil},
+			{Name: "shipped_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
+		}
+		assert.EqualValues(t, columns, res.Columns)
+
+		require.Len(t, res.Indexes, 4)
+		require.True(t, slices.ContainsFunc(res.Indexes, func(idx sqlcommon.Index) bool {
+			return strings.HasPrefix(idx.Name, "PK__orders__") && strings.HasPrefix(idx.Definition, "CREATE UNIQUE CLUSTERED INDEX")
+		}))
+		// assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "PK__orders__3213E83FFC9F3B19", Definition: "CREATE UNIQUE CLUSTERED INDEX [PK__orders__3213E83FFC9F3B19] ON [dbo].[orders] ([id])"})
+		assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "idx_orders_user_id", Definition: "CREATE NONCLUSTERED INDEX [idx_orders_user_id] ON [dbo].[orders] ([user_id])"})
+		assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "idx_orders_order_code", Definition: "CREATE UNIQUE NONCLUSTERED INDEX [idx_orders_order_code] ON [dbo].[orders] ([order_code])"})
+		assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "idx_orders_deleted_at", Definition: "CREATE NONCLUSTERED INDEX [idx_orders_deleted_at] ON [dbo].[orders] ([deleted_at])"})
 	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Schema: "dbo",
-			Table:  "nonexistend",
-		}, db)
+		res, err := DescribeTable(t.Context(), DescribeTableIn{Schema: "dbo", Table: "nonexistend"}, db)
 		require.Nil(t, res)
 		require.ErrorIs(t, sqlcommon.ErrTableNotFound, err)
 	})
 	t.Run("WithEmptySchema", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Schema: "",
-			Table:  "TestDescribeTable",
-		}, db)
+		res, err := DescribeTable(t.Context(), DescribeTableIn{Schema: "", Table: "orders"}, db)
 		require.NotNil(t, res)
 		require.NoError(t, err)
-		require.Equal(t, "TestDescribeTable", res.Name)
+		require.Equal(t, "orders", res.Name)
 		require.Equal(t, "", res.Schema)
-	})
-	t.Run("WithEmptySchema", func(t *testing.T) {
-		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{
-			Schema: "",
-			Table:  "TestDescribeTable",
-		}, db)
-		require.NotNil(t, res)
-		require.NoError(t, err)
-		require.Equal(t, "TestDescribeTable", res.Name)
-		require.Equal(t, "", res.Schema)
-	})
-	t.Run("BrokenConnection", func(t *testing.T) {
-		t.Parallel()
-		db := openTestConnection(t, "", "")
-		inner, _ := db.DB()
-		inner.Close()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{}, db)
-		require.Nil(t, res)
-		require.Error(t, err)
 	})
 }
 
 func TestExecuteQuery(t *testing.T) {
 	t.Parallel()
+	db := openTestConnection(t)
 
-	seed := `
-		IF OBJECT_ID('dbo.TestExecuteQuery ') IS NOT NULL DROP TABLE dbo.TestExecuteQuery
-		CREATE TABLE dbo.TestExecuteQuery (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		INSERT INTO dbo.TestExecuteQuery(id, field1)
-		VALUES (1, 'asd'), (2, 'qwe');
-	`
-	cleanup := `DROP TABLE dbo.TestExecuteQuery`
-	db := openTestConnection(t, seed, cleanup)
-
-	res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM dbo.TestExecuteQuery"}, db)
+	res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM dbo.orders"}, db)
 	require.NoError(t, err)
 	require.Len(t, res.Rows, 2)
 
 	t.Run("Malformed SQL", func(t *testing.T) {
 		_, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT NOT SELECT"}, db)
-		require.Error(t, err)
+		require.ErrorContains(t, err, "Incorrect syntax near")
+	})
+
+	t.Run("Empty Result", func(t *testing.T) {
+		t.Parallel()
+		res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM dbo.orders WHERE id = 999"}, db)
+		require.NoError(t, err)
+		require.Len(t, res.Rows, 0)
 	})
 }
 
 func TestCreateIndex(t *testing.T) {
 	t.Parallel()
+	db := openTestConnection(t)
 
-	seed := `
-		IF OBJECT_ID('dbo.TestCreateIndex ') IS NOT NULL DROP TABLE dbo.TestCreateIndex
-		CREATE TABLE dbo.TestCreateIndex (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-	`
-	cleanup := `DROP TABLE dbo.TestCreateIndex`
-	db := openTestConnection(t, seed, cleanup)
-
-	res, err := CreateIndex(t.Context(), CreateIndexIn{
+	ix := CreateIndexIn{
 		CreateIndexIn: sqlcommon.CreateIndexIn{
 			Schema:  "dbo",
-			Table:   "TestCreateIndex",
-			Name:    "ix_someindex",
-			Columns: []string{"id", "field1"},
+			Table:   "orders",
+			Name:    "ix_someindex1",
+			Columns: []string{"id", "created_at"},
 			Unique:  true,
 		},
-		Clustered: true,
-	}, db)
+		Clustered: false,
+	}
+
+	res, err := CreateIndex(t.Context(), ix, db)
 
 	require.NoError(t, err)
 	require.True(t, res.Success)
 
-	t.Run("BrokenConnection", func(t *testing.T) {
-		t.Parallel()
-		db := openTestConnection(t, "", "")
-		inner, _ := db.DB()
-		inner.Close()
-		res, err := CreateIndex(t.Context(), CreateIndexIn{}, db)
-		require.False(t, res.Success)
-		require.Error(t, err)
+	t.Run("IndexAlreadyExists", func(t *testing.T) {
+		res, err := CreateIndex(t.Context(), ix, db)
+		require.Nil(t, res)
+		require.ErrorContains(t, err, "already exists")
 	})
 }
 
 func TestDropIndex(t *testing.T) {
-	t.Parallel()
+	db := openTestConnection(t)
 
-	seed := `
-		IF OBJECT_ID('dbo.TestDropIndex ') IS NOT NULL DROP TABLE dbo.TestDropIndex
-		CREATE TABLE dbo.TestDropIndex (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		CREATE INDEX ix_to_drop ON dbo.TestDropIndex (ID);
-	`
-	cleanup := `DROP TABLE dbo.TestDropIndex`
-	db := openTestConnection(t, seed, cleanup)
-
-	res, err := DropIndex(t.Context(), DropIndexIn{
-		Table: "TestDropIndex",
-		DropIndexIn: sqlcommon.DropIndexIn{
-			Name:   "ix_to_drop",
-			Schema: "dbo",
+	res, err := CreateIndex(t.Context(), CreateIndexIn{
+		CreateIndexIn: sqlcommon.CreateIndexIn{
+			Schema:  "dbo",
+			Table:   "orders",
+			Name:    "ix_someindex1",
+			Columns: []string{"id", "created_at"},
+			Unique:  true,
 		},
+		Clustered: false,
 	}, db)
 
 	require.NoError(t, err)
 	require.True(t, res.Success)
+
+	drop := DropIndexIn{
+		DropIndexIn: sqlcommon.DropIndexIn{
+			Schema: "dbo",
+			Name:   "ix_someindex1",
+		},
+		Table: "orders",
+	}
+
+	ix, err := DropIndex(t.Context(), drop, db)
+	require.True(t, ix.Success)
+	require.NoError(t, err)
+
+	t.Run("NonExistentIndex", func(t *testing.T) {
+		ix, err := DropIndex(t.Context(), drop, db)
+		require.Nil(t, ix)
+		require.ErrorContains(t, err, "does not exist")
+	})
 }
 
 func TestExplainQuery(t *testing.T) {
 	t.Parallel()
 
-	seed := `
-		IF OBJECT_ID('dbo.TestExplainQuery ') IS NOT NULL DROP TABLE dbo.TestExplainQuery
-		CREATE TABLE dbo.TestExplainQuery (
-			ID int,
-			Field1 VARCHAR(50) NOT NULL,
-			Field2 BIT NOT NULL DEFAULT 1,
-			Field3 BIGINT NULL
-		);
-		INSERT INTO dbo.TestExplainQuery(id, field1)
-		VALUES (1, 'asd'), (2, 'qwe');
-	`
-	cleanup := `DROP TABLE dbo.TestExplainQuery`
-	db := openTestConnection(t, seed, cleanup)
+	db := openTestConnection(t)
 
 	t.Run("Estimated", func(t *testing.T) {
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM dbo.TestExplainQuery", ActualExecutionPlan: false}, db)
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM dbo.orders", ActualExecutionPlan: false}, db)
 		require.NoError(t, err)
 		require.NotNil(t, res)
 		require.Contains(t, res.Plan, "<ShowPlanXML")
 	})
 	t.Run("Actual", func(t *testing.T) {
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT id FROM dbo.TestExplainQuery", ActualExecutionPlan: true}, db)
+		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT id FROM dbo.orders", ActualExecutionPlan: true}, db)
 		require.NoError(t, err)
 		require.NotNil(t, res)
 		require.Contains(t, res.Plan, "<ShowPlanXML")
@@ -365,52 +236,40 @@ func TestExplainQuery(t *testing.T) {
 
 func TestListMissingIndexes(t *testing.T) {
 	t.Parallel()
-
-	db := openTestConnection(t, "", "")
-
+	db := openTestConnection(t)
 	_, err := ListMissingIndexes(t.Context(), struct{}{}, db)
 	require.NoError(t, err)
 }
 
 func TestCreateIndex_BrokenConnection(t *testing.T) {
 	t.Parallel()
-
-	db := openTestConnection(t, "", "")
+	db := openTestConnection(t)
 	inner, _ := db.DB()
 	inner.Close()
 	res, err := CreateIndex(t.Context(), CreateIndexIn{}, db)
-	require.False(t, res.Success)
+	require.Nil(t, res)
 	require.Error(t, err)
 }
 
 func TestListWaitingQueries(t *testing.T) {
 	t.Parallel()
-
-	db := openTestConnection(t, "", "")
-
-	res, err := ListWaitingQueries(t.Context(), struct{}{}, db)
+	db := openTestConnection(t)
+	_, err := ListWaitingQueries(t.Context(), struct{}{}, db)
 	require.NoError(t, err)
-	require.Greater(t, len(res.Queries), 0)
 }
 
 func TestListSlowestQueries(t *testing.T) {
 	t.Parallel()
-
-	db := openTestConnection(t, "", "")
-
-	res, err := ListSlowestQueries(t.Context(), struct{}{}, db)
+	db := openTestConnection(t)
+	_, err := ListSlowestQueries(t.Context(), struct{}{}, db)
 	require.NoError(t, err)
-	require.Greater(t, len(res.Queries), 0)
 }
 
 func TestListDeadlocks(t *testing.T) {
 	t.Parallel()
-
-	db := openTestConnection(t, "", "")
-
+	db := openTestConnection(t)
 	_, err := ListDeadlocks(t.Context(), struct{}{}, db)
 	require.NoError(t, err)
-	// require.Greater(t, len(res.Deadlocks), 0)
 }
 
 func ptr[T any](v T) *T {

@@ -122,7 +122,7 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 	).Error
 
 	if err != nil {
-		return &CreateIndexOut{Success: false, Message: err.Error()}, err
+		return nil, err
 	}
 	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s.%s", in.Name, schema, in.Table)}, nil
 }
@@ -140,7 +140,7 @@ func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error
 	).Error
 
 	if err != nil {
-		return &DropIndexOut{Success: false, Message: err.Error()}, err
+		return nil, err
 	}
 	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s.%s", schema, in.Name)}, nil
 }
@@ -155,23 +155,25 @@ type ExplainQueryOut struct {
 }
 
 func ExplainQuery(ctx context.Context, in ExplainQueryIn, db DB) (*ExplainQueryOut, error) {
-	var out ExplainQueryOut
 	var analyze string
 	if in.Analyze {
 		analyze = "ANALYZE, "
 	}
 
-	var plan string
-	err := db.WithContext(ctx).Raw(fmt.Sprintf("EXPLAIN (%sFORMAT JSON) %s", analyze, in.Query)).Scan(&plan).Error
-
-	if err == nil {
-		var plans []map[string]any
-		err = json.Unmarshal([]byte(plan), &plans)
-
-		if err == nil && len(plans) > 0 {
-			out.Plan = plans[0]["Plan"].(map[string]any)
-		}
+	var planJSON string
+	err := db.WithContext(ctx).Raw(fmt.Sprintf("EXPLAIN (%sFORMAT JSON) %s", analyze, in.Query)).Scan(&planJSON).Error
+	if err != nil {
+		return nil, err
 	}
 
-	return &out, err
+	var result []ExplainQueryOut
+	if err := json.Unmarshal([]byte(planJSON), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse explain JSON: %w", err)
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("empty explain result")
+	}
+
+	return &result[0], nil
 }

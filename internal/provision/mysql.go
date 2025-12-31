@@ -1,130 +1,84 @@
 package provision
 
 import (
-	"bytes"
-	_ "embed"
+	"context"
+	"errors"
 	"fmt"
-	"regexp"
 	"strings"
-	"text/template"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
-//go:embed mysql_provision.sql
-var mysqlProvisionSQL string
-
-//go:embed mysql_revoke.sql
-var mysqlRevokeSQL string
-
-var mysqlProvisionTmpl = template.Must(template.New("mysql_provision").Parse(mysqlProvisionSQL))
-var mysqlRevokeTmpl = template.Must(template.New("mysql_revoke").Parse(mysqlRevokeSQL))
-
-type mysqlProvisioner struct{}
-
-func init() {
-	Register("mysql", &mysqlProvisioner{})
+type MySqlProvisioner struct {
+	db *gorm.DB
 }
 
-// enableMultiStatements adds multiStatements=true to a MySQL DSN if not present.
-func enableMultiStatements(dsn string) string {
-	if strings.Contains(dsn, "multiStatements=true") {
-		return dsn
-	}
-	if strings.Contains(dsn, "?") {
-		return dsn + "&multiStatements=true"
-	}
-	return dsn + "?multiStatements=true"
-}
-
-func (p *mysqlProvisioner) Provision(adminDSN string, opts Options) (*Result, error) {
-	if len(opts.Schemas) == 0 {
-		return nil, fmt.Errorf("at least one schema (database) must be specified")
-	}
-
-	// Enable multi-statement mode for executing the template
-	db, err := gorm.Open(mysql.Open(enableMultiStatements(adminDSN)), &gorm.Config{})
+func (p *MySqlProvisioner) Connect(dsn string) error {
+	db, err := gorm.Open(mysql.Open(dsn))
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+		return err
 	}
-
-	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
-
-	username := opts.Username
-	if username == "" {
-		username = GenerateUsername()
-	}
-	password := opts.Password
-	if password == "" {
-		password = GeneratePassword()
-	}
-
-	var buf bytes.Buffer
-	if err := mysqlProvisionTmpl.Execute(&buf, map[string]any{
-		"Username": username,
-		"Password": password,
-		"Schemas":  opts.Schemas,
-		"Update":   opts.Update,
-	}); err != nil {
-		return nil, fmt.Errorf("failed to render provision script: %w", err)
-	}
-
-	if err := db.Exec(buf.String()).Error; err != nil {
-		return nil, fmt.Errorf("failed to provision user: %w", err)
-	}
-
-	readonlyDSN, err := replaceMySQLCredentials(adminDSN, username, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build readonly DSN: %w", err)
-	}
-
-	return &Result{
-		User:     username,
-		Password: password,
-		DSN:      readonlyDSN,
-		Grants:   []string{buf.String()},
-	}, nil
-}
-
-func (p *mysqlProvisioner) Revoke(adminDSN string, username string) error {
-	db, err := gorm.Open(mysql.Open(adminDSN), &gorm.Config{})
-	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
-	}
-
-	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
-
-	var buf bytes.Buffer
-	if err := mysqlRevokeTmpl.Execute(&buf, map[string]any{
-		"Username": username,
-	}); err != nil {
-		return fmt.Errorf("failed to render revoke script: %w", err)
-	}
-
-	if err := db.Exec(buf.String()).Error; err != nil {
-		return fmt.Errorf("failed to revoke user: %w", err)
-	}
-
+	p.db = db
 	return nil
 }
 
-// replaceMySQLCredentials replaces user/password in a MySQL DSN.
-// MySQL DSN format: user:password@tcp(host:port)/dbname?params
-func replaceMySQLCredentials(dsn, newUser, newPassword string) (string, error) {
-	// Pattern: user:password@protocol(host)/db
-	re := regexp.MustCompile(`^([^:]+):([^@]+)@`)
-	if re.MatchString(dsn) {
-		return re.ReplaceAllString(dsn, fmt.Sprintf("%s:%s@", newUser, newPassword)), nil
+func (p *MySqlProvisioner) Close() error {
+	db, err := p.db.DB()
+	if err != nil {
+		return err
 	}
+	return db.Close()
+}
 
-	// Pattern without password: user@protocol(host)/db
-	re = regexp.MustCompile(`^([^@]+)@`)
-	if re.MatchString(dsn) {
-		return re.ReplaceAllString(dsn, fmt.Sprintf("%s:%s@", newUser, newPassword)), nil
+func (p *MySqlProvisioner) DropUser(ctx context.Context, user string) error {
+	return p.db.WithContext(ctx).Exec(fmt.Sprintf("DROP USER IF EXISTS '%s'@'%%';", user)).Error
+}
+
+func (p *MySqlProvisioner) UserExists(ctx context.Context, user string) (*bool, error) {
+	var exists bool
+	err := p.db.WithContext(ctx).Raw("SELECT EXISTS (SELECT 1 FROM mysql.user WHERE user = ? AND host = '%');", user).Find(&exists).Error
+	if err != nil {
+		return nil, err
 	}
+	return &exists, nil
+}
 
-	return "", fmt.Errorf("unrecognized DSN format")
+func (p *MySqlProvisioner) CreateUser(ctx context.Context, user, pass string) error {
+	if user == "" || pass == "" {
+		return errors.New("user and password are required")
+	}
+	return p.db.WithContext(ctx).Exec(fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED BY '%s'", user, pass)).Error
+}
+
+func (p *MySqlProvisioner) GrantReadOnly(ctx context.Context, user string, scope AccessScope) error {
+	if len(scope.Groups) > 0 {
+		if err := p.grantSchemas(ctx, user, scope.Groups); err != nil {
+			return err
+		}
+	}
+	if len(scope.Resources) > 0 {
+		if err := p.grantTables(ctx, user, scope.Resources); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *MySqlProvisioner) grantTables(ctx context.Context, user string, tables []string) error {
+	var query strings.Builder
+	for _, table := range tables {
+		fmt.Fprintf(&query, "GRANT SELECT ON `%s` TO '%s'@'%%';\n", table, user)
+	}
+	fmt.Fprintf(&query, "FLUSH PRIVILEGES;")
+	return p.db.WithContext(ctx).Exec(query.String()).Error
+}
+
+func (p *MySqlProvisioner) grantSchemas(ctx context.Context, user string, schemas []string) error {
+	var query strings.Builder
+	for _, schema := range schemas {
+		fmt.Fprintf(&query, "GRANT SELECT ON `%s`.* TO '%s'@'%%';\n", schema, user)
+	}
+	fmt.Fprintf(&query, "FLUSH PRIVILEGES;")
+	return p.db.WithContext(ctx).Exec(query.String()).Error
 }

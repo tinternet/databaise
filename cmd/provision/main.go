@@ -1,188 +1,102 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"flag"
 	"fmt"
-	"os"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/tinternet/databaise/internal/provision"
 )
 
 func main() {
-	// Common flags
-	backend := flag.String("backend", "", "Database backend: postgres, mysql, sqlserver")
-	adminDSN := flag.String("admin-dsn", "", "Admin DSN for connecting to create the user")
-	schemas := flag.String("schemas", "", "Comma-separated schemas to grant access to (empty = all)")
-	tables := flag.String("tables", "", "Comma-separated tables as schema.table or schema:table1,table2")
-	outputJSON := flag.Bool("json", false, "Output result as JSON")
-	outputConfig := flag.Bool("config", false, "Output as databaise config snippet")
-	update := flag.Bool("update", false, "Update existing user's permissions instead of failing")
-
-	// Revoke mode
-	revoke := flag.String("revoke", "", "Username to revoke (instead of provisioning)")
-
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `databaise-provision: Create readonly database users for databaise
-
-Usage:
-  databaise-provision -backend postgres -admin-dsn "postgres://admin:pass@host/db" [options]
-  databaise-provision -backend mysql -admin-dsn "user:pass@tcp(host)/db" [options]
-  databaise-provision -backend sqlserver -admin-dsn "sqlserver://user:pass@host?database=db" [options]
-
-Provision Options:
-  -backend      Database backend: postgres, mysql, sqlserver (required)
-  -admin-dsn    Admin connection string (required)
-  -schemas      Comma-separated schemas to grant access to (empty = all objects)
-  -tables       Specific tables in format: schema:table1,table2 or schema.table
-  -update       Update existing user's permissions (default: fail if exists)
-  -json         Output result as JSON
-  -config       Output as databaise config snippet
-
-Revoke Options:
-  -revoke       Username to revoke (drops the user)
-
-Examples:
-  # Create readonly user with access to entire database
-  databaise-provision -backend postgres -admin-dsn "postgres://admin:pass@localhost/mydb"
-
-  # Create readonly user with access to specific schemas
-  databaise-provision -backend postgres -admin-dsn "..." -schemas "public,analytics"
-
-  # Create readonly user with access to specific tables
-  databaise-provision -backend postgres -admin-dsn "..." -tables "public:users,orders"
-
-  # Revoke a previously created user
-  databaise-provision -backend postgres -admin-dsn "..." -revoke databaise_ro_abc123
-
-`)
-	}
+	backend := flag.String("backend", "", "postgres, mysql, sqlserver")
+	dsn := flag.String("dsn", "", "Admin Connection String")
+	scopeFlag := flag.String("scope", "", "Comma-separated Schemas/DBs (Grants ALL access)")
+	resourceFlag := flag.String("resources", "", "Comma-separated FQNs (schema.table) (Grants Specific access)")
+	user := flag.String("user", "", "Username to create/manage")
+	revoke := flag.Bool("revoke", false, "Revoke and drop the user")
 
 	flag.Parse()
 
-	if *backend == "" {
-		fmt.Fprintln(os.Stderr, "Error: -backend is required")
-		flag.Usage()
-		os.Exit(1)
+	if *scopeFlag != "" && *resourceFlag != "" {
+		log.Fatal("Error: You cannot use -scope and -resources together. Choose one.")
+	}
+	if *scopeFlag == "" && *resourceFlag == "" && !*revoke {
+		log.Fatal("Error: You must provide either -scope or -resources (unless revoking).")
+	}
+	if *backend == "" || *dsn == "" || *user == "" {
+		log.Fatal("Error: -backend, -dsn, and -user are required.")
 	}
 
-	if *adminDSN == "" {
-		fmt.Fprintln(os.Stderr, "Error: -admin-dsn is required")
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	provisioner, ok := provision.Get(*backend)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "Error: unsupported backend %q\n", *backend)
-		fmt.Fprintf(os.Stderr, "Supported backends: %s\n", strings.Join(provision.List(), ", "))
-		os.Exit(1)
-	}
-
-	// Revoke mode
-	if *revoke != "" {
-		if err := provisioner.Revoke(*adminDSN, *revoke); err != nil {
-			fmt.Fprintf(os.Stderr, "Error revoking user: %v\n", err)
-			os.Exit(1)
+	scope := provision.AccessScope{}
+	if *scopeFlag != "" {
+		for v := range strings.SplitSeq(*scopeFlag, ",") {
+			scope.Groups = append(scope.Groups, strings.TrimSpace(v))
 		}
-		fmt.Printf("Successfully revoked user: %s\n", *revoke)
+	} else if *resourceFlag != "" {
+		for v := range strings.SplitSeq(*resourceFlag, ",") {
+			if !strings.Contains(v, ".") {
+				log.Fatalf("Error: Resource '%s' is not fully qualified. Use format 'schema.table' or 'db.collection'", v)
+			}
+			scope.Resources = append(scope.Resources, strings.TrimSpace(v))
+		}
+	}
+
+	var p provision.Provisioner
+	switch *backend {
+	case "postgres":
+		p = &provision.PostgresProvisioner{}
+	case "mysql":
+		p = &provision.MySqlProvisioner{}
+	case "sqlserver":
+		p = &provision.SqlServerProvisioner{}
+	default:
+		log.Fatal("Unknown backend type")
+	}
+
+	if err := p.Connect(*dsn); err != nil {
+		log.Fatalf("Connection failed: %v", err)
+	}
+	defer p.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if *revoke {
+		if err := p.DropUser(ctx, *user); err != nil {
+			log.Fatalf("Revoke failed: %v", err)
+		}
+		fmt.Printf("User %s revoked.\n", *user)
 		return
 	}
 
-	// Provision mode
-	opts := provision.Options{
-		Update: *update,
-	}
-
-	// Parse schemas and tables into the Schemas map
-	if *schemas != "" || *tables != "" {
-		opts.Schemas = make(map[string][]string)
-
-		// Add schemas with full access
-		if *schemas != "" {
-			for schema := range strings.SplitSeq(*schemas, ",") {
-				schema = strings.TrimSpace(schema)
-				if schema != "" {
-					opts.Schemas[schema] = []string{} // empty = all objects
-				}
-			}
-		}
-
-		// Add specific tables
-		if *tables != "" {
-			// Support formats:
-			// - "schema:table1,table2" -> schema with specific tables
-			// - "schema.table" -> single table
-			for entry := range strings.SplitSeq(*tables, " ") {
-				entry = strings.TrimSpace(entry)
-				if entry == "" {
-					continue
-				}
-
-				if strings.Contains(entry, ":") {
-					// Format: schema:table1,table2
-					parts := strings.SplitN(entry, ":", 2)
-					schema := strings.TrimSpace(parts[0])
-					tableList := strings.Split(parts[1], ",")
-					for i, t := range tableList {
-						tableList[i] = strings.TrimSpace(t)
-					}
-					opts.Schemas[schema] = tableList
-				} else if strings.Contains(entry, ".") {
-					// Format: schema.table
-					parts := strings.SplitN(entry, ".", 2)
-					schema := strings.TrimSpace(parts[0])
-					table := strings.TrimSpace(parts[1])
-					if existing, ok := opts.Schemas[schema]; ok {
-						opts.Schemas[schema] = append(existing, table)
-					} else {
-						opts.Schemas[schema] = []string{table}
-					}
-				}
-			}
-		}
-	}
-
-	result, err := provisioner.Provision(*adminDSN, opts)
+	exists, err := p.UserExists(ctx, *user)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error provisioning user: %v\n", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
-	if *outputJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(result)
-		return
-	}
-
-	if *outputConfig {
-		config := map[string]any{
-			"type": *backend,
-			"read": map[string]string{
-				"dsn": result.DSN,
-			},
+	if !*exists {
+		fmt.Println("Generating password...")
+		password, err := provision.GeneratePassword()
+		if err != nil {
+			log.Fatal(err)
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(config)
-		return
+
+		fmt.Println("Creating user...")
+		err = p.CreateUser(ctx, *user, password)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Printf("Success! User: %s Password: %s\n", *user, password)
 	}
 
-	// Human-readable output
-	fmt.Println("Readonly user created successfully!")
-	fmt.Println()
-	fmt.Printf("  Username: %s\n", result.User)
-	fmt.Printf("  Password: %s\n", result.Password)
-	fmt.Println()
-	fmt.Println("  DSN (for databaise config):")
-	fmt.Printf("    %s\n", result.DSN)
-	fmt.Println()
-	fmt.Println("  Grants applied:")
-	for _, grant := range result.Grants {
-		fmt.Printf("    %s\n", grant)
+	fmt.Println("Granting permissions...")
+	if err := p.GrantReadOnly(ctx, *user, scope); err != nil {
+		log.Fatalf("Grant failed: %v", err)
 	}
-	fmt.Println()
-	fmt.Printf("  To revoke: databaise-provision -backend %s -admin-dsn \"...\" -revoke %s\n", *backend, result.User)
+	fmt.Println("Success!")
 }
