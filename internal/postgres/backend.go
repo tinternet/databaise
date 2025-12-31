@@ -1,7 +1,9 @@
 package postgres
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/tinternet/databaise/internal/backend"
@@ -30,6 +32,38 @@ type DB struct {
 }
 
 type Connector struct{}
+
+func (c Connector) ValidateConfig(r *ReadConfig, w *WriteConfig, a *AdminConfig) error {
+	m := make(map[string]bool)
+
+	if r != nil {
+		if u, err := url.Parse(r.DSN); err != nil {
+			return err
+		} else {
+			m[u.Path] = true
+		}
+	}
+	if w != nil {
+		if u, err := url.Parse(w.DSN); err != nil {
+			return err
+		} else {
+			m[u.Path] = true
+		}
+	}
+	if a != nil {
+		if u, err := url.Parse(a.DSN); err != nil {
+			return err
+		} else {
+			m[u.Path] = true
+		}
+	}
+
+	if len(m) > 1 {
+		return errors.New("read, write, admin configs must point to the same database")
+	}
+
+	return nil
+}
 
 func openConnection(dsn string, gormCfg *gorm.Config, useReadonlyTx bool) (DB, error) {
 	db, err := gorm.Open(postgres.Open(dsn), gormCfg)

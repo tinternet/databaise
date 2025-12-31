@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinternet/databaise/internal/sqltest"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
 func setupMySqlDatabase(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := setupMySqlContainer(t)
+	dsn := sqltest.SetupMySqlContainer(t)
 	provisioner := MySqlProvisioner{}
 
 	password, err := GeneratePassword()
@@ -43,14 +44,14 @@ func TestMySql_ReadOnlyAccess(t *testing.T) {
 
 func TestMySql_BadInputs(t *testing.T) {
 	t.Parallel()
-	dsn := setupMySqlContainer(t)
+	dsn := sqltest.SetupMySqlContainer(t)
 	provisioner := MySqlProvisioner{}
 	testBadInputs(t, &provisioner, dsn)
 }
 
 func TestMySql_DropUser(t *testing.T) {
 	t.Parallel()
-	dsn := setupMySqlContainer(t)
+	dsn := sqltest.SetupMySqlContainer(t)
 	provisioner := MySqlProvisioner{}
 	testDropUser(t, &provisioner, dsn)
 }

@@ -62,6 +62,7 @@ type Backend[DB any] struct {
 }
 
 type Connector[R, W, A, DB any] interface {
+	ValidateConfig(read *R, write *W, admin *A) error
 	ConnectRead(cfg R) (DB, error)
 	ConnectWrite(cfg W) (DB, error)
 	ConnectAdmin(cfg A) (DB, error)

@@ -102,6 +102,7 @@ func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut,
 	if in.Unique {
 		unique = "UNIQUE"
 	}
+
 	exprs := make([]clause.Expression, len(in.Columns))
 	for i, col := range in.Columns {
 		exprs[i] = clause.Expr{SQL: "?", Vars: []any{clause.Column{Name: col}}}

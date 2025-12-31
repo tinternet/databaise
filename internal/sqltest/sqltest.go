@@ -1,12 +1,14 @@
 package sqltest
 
 import (
+	"log"
 	"net/url"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func ReplaceURLCredentials(t *testing.T, dsn, user, pass string) string {
@@ -55,4 +57,12 @@ func Seed(t *testing.T, db *gorm.DB) {
 	require.NoError(t, db.Create(&orders).Error)
 
 	t.Logf("Seeded %d users and %d orders", len(users), len(orders))
+}
+
+func GormConfig(t *testing.T) *gorm.Config {
+	t.Helper()
+	return &gorm.Config{Logger: logger.New(
+		log.New(t.Output(), "", log.LstdFlags),
+		logger.Config{LogLevel: logger.Error, Colorful: true},
+	)}
 }

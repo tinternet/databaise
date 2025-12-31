@@ -32,6 +32,6 @@ go.work.sum
 # .vscode/
 
 config.yaml
-# cmd/playground
+cmd/playground
 # Added by goreleaser init:
 dist/
