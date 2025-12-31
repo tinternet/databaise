@@ -24,7 +24,9 @@ internal/
 ├── postgres/         # PostgreSQL backend
 ├── sqlite/           # SQLite backend
 ├── sqlserver/        # SQL Server backend
+├── mysql/            # MySQL backend
 └── provision/        # Database user provisioning logic
+└── sqltest/          # Testing utilities for SQL backends
 ```
 
 ## Config Structure

@@ -51,6 +51,7 @@ sqlserver_read_query
 | PostgreSQL | `postgres` | PostgreSQL |
 | SQLite | `sqlite` | SQLite |
 | SQL Server | `sqlserver` | T-SQL |
+| MySQL | `mysql` | MySQL |
 
 ### Operation Levels
 
@@ -105,19 +106,22 @@ Only include the sections you want to enable. Omit a section to disable those to
 1) **Single Statement:** The protocol enforces a single SQL statement per request, which prevents query stacking (injecting `;COMMIT;` followed by a malicious write).
 2) **Transaction Containment:** PostgreSQL's `EXECUTE` statement explicitly forbids transaction control commands, making it impossible to escape the read-only transaction context using tricks like `EXECUTE "COMMIT; DROP TABLE ..."`
 
-
-### SQLite
+### MySQL
 
 ```json
 {
-    "cache": {
-        "type": "sqlite",
-        "description": "Local cache database.",
+    "analytics": {
+        "type": "mysql",
+        "description": "Analytics data warehouse.",
         "read": {
-            "path": "/data/cache.db"
+            "dsn": "mysql://reader:pass@localhost:3306/analytics",
+            "enforce_readonly": true,
         },
         "write": {
-            "path": "/data/cache.db"
+            "dsn": "mysql://writer:pass@localhost:3306/analytics"
+        },
+        "admin": {
+            "dsn": "mysql://admin:pass@localhost:3306/analytics"
         }
     }
 }
@@ -127,9 +131,31 @@ Only include the sections you want to enable. Omit a section to disable those to
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `path` | string | required | Path to SQLite database file |
+| `dsn` | string | required | MySQL connection string |
+| `enforce_readonly` | bool | `true` | **Startup Check**: Verifies the database user cannot write. |
 
-SQLite automatically uses `?mode=ro` for read connections.
+
+### SQLite
+
+```json
+{
+    "cache": {
+        "type": "sqlite",
+        "description": "Local cache database.",
+        "read": { "path": "/data/cache.db" },
+        "write": { "path": "/data/cache.db" },
+        "admin": { "path": "/data/cache.db" }
+    }
+}
+```
+
+SQLite automatically appends the `?mode=ro` for `read` connections.
+
+**Options:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | string | required | Path to SQLite database file |
 
 ### SQL Server
 
@@ -144,6 +170,9 @@ SQLite automatically uses `?mode=ro` for read connections.
         },
         "write": {
             "dsn": "sqlserver://writer:pass@localhost:1433?database=orders"
+        },
+        "admin": {
+            "dsn": "sqlserver://admin:pass@localhost:1433?database=orders"
         }
     }
 }
@@ -203,9 +232,3 @@ The readonly user should have `db_datareader` role only.
     }
 }
 ```
-
-This configuration:
-- `customers` - Read and admin tools only (no write)
-- `analytics` - Full access (read, write, admin)
-- `local_cache` - Read-only SQLite
-- `orders` - Read-only SQL Server
