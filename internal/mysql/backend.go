@@ -25,26 +25,14 @@ type Connector struct{}
 func (b Connector) ValidateConfig(r *ReadConfig, w *WriteConfig, a *AdminConfig) error {
 	m := make(map[string]bool)
 
-	if r != nil {
-		if readDB, err := getDatabaseName(r.DSN); err != nil {
-			return err
-		} else {
-			m[readDB] = true
-		}
+	if err := extractDatabaseName(r, m); err != nil {
+		return err
 	}
-	if w != nil {
-		if writeDB, err := getDatabaseName(w.DSN); err != nil {
-			return err
-		} else {
-			m[writeDB] = true
-		}
+	if err := extractDatabaseName(w, m); err != nil {
+		return err
 	}
-	if a != nil {
-		if adminDB, err := getDatabaseName(a.DSN); err != nil {
-			return err
-		} else {
-			m[adminDB] = true
-		}
+	if err := extractDatabaseName(a, m); err != nil {
+		return err
 	}
 
 	if len(m) > 1 {
@@ -117,19 +105,30 @@ func openConnection(dsn string, gormCfg *gorm.Config) (*gorm.DB, error) {
 	return gorm.Open(mysql.Open(dsn), gormCfg)
 }
 
-func getDatabaseName(dsn string) (string, error) {
+func extractDatabaseName(c config.DSNConfig, m map[string]bool) error {
+	if c == nil {
+		return nil
+	}
+
+	dsn := c.GetDSN()
 	parts := strings.Split(dsn, "/")
 	if len(parts) < 2 {
-		return "", errors.New("could not parse mysql dsn")
+		return errors.New("could not parse mysql dsn")
 	}
+
 	parts = strings.Split(parts[len(parts)-1], "?")
 	if parts[0] == "" {
-		return "", errors.New("database not specified")
+		return errors.New("database not specified")
 	}
-	return parts[0], nil
+
+	m[parts[0]] = true
+	return nil
 }
 
 func enableParseTime(dsn string) string {
+	if strings.Contains(dsn, "parseTime=true") {
+		return dsn
+	}
 	if strings.Contains(dsn, "&") || strings.Contains(dsn, "?") {
 		return dsn + "&parseTime=true"
 	}

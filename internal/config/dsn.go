@@ -29,3 +29,11 @@ type AdminConfig struct {
 	// DSN is the connection string for admin operations.
 	DSN string `json:"dsn"`
 }
+
+type DSNConfig interface {
+	GetDSN() string
+}
+
+func (c ReadConfig) GetDSN() string  { return c.DSN }
+func (c WriteConfig) GetDSN() string { return c.DSN }
+func (c AdminConfig) GetDSN() string { return c.DSN }
