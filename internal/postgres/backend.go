@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/tinternet/databaise/internal/backend"
 	"github.com/tinternet/databaise/internal/config"
@@ -37,14 +36,7 @@ func openConnection(dsn string, gormCfg *gorm.Config, useReadonlyTx bool) (DB, e
 func (b Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 	log.Printf("Opening read connection")
 
-	gormConfig := &gorm.Config{Logger: logging.NewGormLogger()}
-
-	if cfg.UseReadonlyTx {
-		gormConfig.PrepareStmt = true
-		gormConfig.PrepareStmtTTL = time.Minute * 5
-	}
-
-	db, err := openConnection(cfg.DSN, gormConfig, cfg.UseReadonlyTx)
+	db, err := openConnection(cfg.DSN, &gorm.Config{Logger: logging.NewGormLogger()}, cfg.UseReadonlyTx)
 	if err != nil {
 		return DB{}, err
 	}
@@ -92,6 +84,10 @@ func init() {
 	backend.AddAdminTool(&b, "explain_query", "[PostgreSQL] Explain a query's execution plan.", ExplainQuery)
 	backend.AddAdminTool(&b, "create_index", "[PostgreSQL] Create an index on a table.", CreateIndex)
 	backend.AddAdminTool(&b, "drop_index", "[PostgreSQL] Drop an index on a table.", DropIndex)
+	backend.AddAdminTool(&b, "list_missing_indexes", "[PostgreSQL] List tables that might benefit from indexes based on sequential scan statistics.", ListMissingIndexes)
+	backend.AddAdminTool(&b, "list_waiting_queries", "[PostgreSQL] List currently waiting queries with blocking information.", ListWaitingQueries)
+	backend.AddAdminTool(&b, "list_slowest_queries", "[PostgreSQL] List slowest queries by total elapsed time (requires pg_stat_statements extension).", ListSlowestQueries)
+	backend.AddAdminTool(&b, "list_deadlocks", "[PostgreSQL] List deadlock counts by database.", ListDeadlocks)
 
 	backend.Register(&b)
 }

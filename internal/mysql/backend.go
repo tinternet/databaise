@@ -111,6 +111,10 @@ func init() {
 	backend.AddAdminTool(&b, "explain_query", "[MySQL] Explain a query's execution plan.", ExplainQuery)
 	backend.AddAdminTool(&b, "create_index", "[MySQL] Create an index on a table.", CreateIndex)
 	backend.AddAdminTool(&b, "drop_index", "[MySQL] Drop an index on a table.", DropIndex)
+	backend.AddAdminTool(&b, "list_missing_indexes", "[MySQL] List tables that might benefit from indexes based on performance_schema statistics.", ListMissingIndexes)
+	backend.AddAdminTool(&b, "list_waiting_queries", "[MySQL] List currently waiting queries with blocking information.", ListWaitingQueries)
+	backend.AddAdminTool(&b, "list_slowest_queries", "[MySQL] List slowest queries by total elapsed time from performance_schema.", ListSlowestQueries)
+	backend.AddAdminTool(&b, "list_deadlocks", "[MySQL] Show most recent deadlock information from InnoDB status.", ListDeadlocks)
 
 	backend.Register(&b)
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tinternet/databaise/internal/sqlcommon"
 	"github.com/tinternet/databaise/internal/sqltest"
@@ -72,31 +73,18 @@ func TestDescribeTable(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, res)
 
-		require.Equal(t, "orders", res.Name)
+		assert.Contains(t, res.CreateTable, "CREATE TABLE")
+		assert.Contains(t, res.CreateTable, "orders")
+		assert.Greater(t, len(res.CreateIndexes), 0)
 
-		columns := []sqlcommon.Column{
-			{Name: "id", DatabaseType: "INTEGER", IsNullable: true, DefaultValue: nil},
-			{Name: "created_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
-			{Name: "updated_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
-			{Name: "deleted_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
-			{Name: "order_code", DatabaseType: "TEXT", IsNullable: false, DefaultValue: nil},
-			{Name: "amount", DatabaseType: "REAL", IsNullable: false, DefaultValue: nil},
-			{Name: "user_id", DatabaseType: "INTEGER", IsNullable: false, DefaultValue: nil},
-			{Name: "shipped_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
+		for _, i := range res.CreateIndexes {
+			assert.Contains(t, i, "CREATE")
+			assert.Contains(t, i, "INDEX")
 		}
-		require.EqualValues(t, columns, res.Columns)
-
-		indexes := []sqlcommon.Index{
-			// {Name: "orders_pkey", Definition: "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)"},
-			{Name: "idx_orders_user_id", Definition: "CREATE INDEX `idx_orders_user_id` ON `orders`(`user_id`)"},
-			{Name: "idx_orders_order_code", Definition: "CREATE UNIQUE INDEX `idx_orders_order_code` ON `orders`(`order_code`)"},
-			{Name: "idx_orders_deleted_at", Definition: "CREATE INDEX `idx_orders_deleted_at` ON `orders`(`deleted_at`)"},
-		}
-		require.EqualValues(t, indexes, res.Indexes)
 	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "nonexistend"}, db)
+		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "nonexistent"}, db)
 		require.Nil(t, res)
 		require.ErrorIs(t, sqlcommon.ErrTableNotFound, err)
 	})
@@ -188,14 +176,12 @@ func TestExplainQuery(t *testing.T) {
 		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM orders"}, db)
 		require.NoError(t, err)
 		require.Greater(t, len(res.Plan), 1)
-		t.Logf("%v", res.Plan)
 	})
 	t.Run("ExplainQueryPlan", func(t *testing.T) {
 		t.Parallel()
 		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM orders", QueryPlan: true}, db)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(res.Plan), 1)
-		t.Logf("%v", res.Plan)
 	})
 	t.Run("MalformedQuery", func(t *testing.T) {
 		t.Parallel()

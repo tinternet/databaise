@@ -75,8 +75,8 @@ func TestListTables(t *testing.T) {
 	db := openTestConnection(t)
 	l, err := ListTables(t.Context(), ListTablesIn{}, db)
 	require.NoError(t, err)
-	assert.Contains(t, l.Tables, sqlcommon.Table{Schema: "dbo", Name: "orders"})
-	assert.Contains(t, l.Tables, sqlcommon.Table{Schema: "dbo", Name: "users"})
+	assert.Contains(t, l.Tables, Table{Schema: "dbo", Name: "orders"})
+	assert.Contains(t, l.Tables, Table{Schema: "dbo", Name: "users"})
 }
 
 func TestDescribeTable(t *testing.T) {
@@ -90,43 +90,19 @@ func TestDescribeTable(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, res)
 
-		assert.Equal(t, "dbo", res.Schema)
-		assert.Equal(t, "orders", res.Name)
-
-		columns := []sqlcommon.Column{
-			{Name: "id", DatabaseType: "bigint", IsNullable: false, DefaultValue: nil},
-			{Name: "created_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
-			{Name: "updated_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
-			{Name: "deleted_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
-			{Name: "order_code", DatabaseType: "nvarchar", IsNullable: false, DefaultValue: nil},
-			{Name: "amount", DatabaseType: "float", IsNullable: false, DefaultValue: nil},
-			{Name: "user_id", DatabaseType: "bigint", IsNullable: false, DefaultValue: nil},
-			{Name: "shipped_at", DatabaseType: "datetimeoffset", IsNullable: true, DefaultValue: nil},
-		}
-		assert.EqualValues(t, columns, res.Columns)
-
-		require.Len(t, res.Indexes, 4)
-		require.True(t, slices.ContainsFunc(res.Indexes, func(idx sqlcommon.Index) bool {
-			return strings.HasPrefix(idx.Name, "PK__orders__") && strings.HasPrefix(idx.Definition, "CREATE UNIQUE CLUSTERED INDEX")
+		assert.Contains(t, res.CreateTable, "CREATE TABLE")
+		assert.True(t, slices.ContainsFunc(res.CreateIndexes, func(v string) bool {
+			return strings.Contains(v, "CREATE") && strings.Contains(v, "INDEX")
 		}))
-		// assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "PK__orders__3213E83FFC9F3B19", Definition: "CREATE UNIQUE CLUSTERED INDEX [PK__orders__3213E83FFC9F3B19] ON [dbo].[orders] ([id])"})
-		assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "idx_orders_user_id", Definition: "CREATE NONCLUSTERED INDEX [idx_orders_user_id] ON [dbo].[orders] ([user_id])"})
-		assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "idx_orders_order_code", Definition: "CREATE UNIQUE NONCLUSTERED INDEX [idx_orders_order_code] ON [dbo].[orders] ([order_code])"})
-		assert.Contains(t, res.Indexes, sqlcommon.Index{Name: "idx_orders_deleted_at", Definition: "CREATE NONCLUSTERED INDEX [idx_orders_deleted_at] ON [dbo].[orders] ([deleted_at])"})
+		assert.True(t, slices.ContainsFunc(res.CreateConstraints, func(v string) bool {
+			return strings.Contains(v, "ADD CONSTRAINT")
+		}))
 	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
 		res, err := DescribeTable(t.Context(), DescribeTableIn{Schema: "dbo", Table: "nonexistend"}, db)
 		require.Nil(t, res)
 		require.ErrorIs(t, sqlcommon.ErrTableNotFound, err)
-	})
-	t.Run("WithEmptySchema", func(t *testing.T) {
-		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{Schema: "", Table: "orders"}, db)
-		require.NotNil(t, res)
-		require.NoError(t, err)
-		require.Equal(t, "orders", res.Name)
-		require.Equal(t, "", res.Schema)
 	})
 }
 
@@ -156,13 +132,11 @@ func TestCreateIndex(t *testing.T) {
 	db := openTestConnection(t)
 
 	ix := CreateIndexIn{
-		CreateIndexIn: sqlcommon.CreateIndexIn{
-			Schema:  "dbo",
-			Table:   "orders",
-			Name:    "ix_someindex1",
-			Columns: []string{"id", "created_at"},
-			Unique:  true,
-		},
+		Schema:    "dbo",
+		Table:     "orders",
+		Name:      "ix_someindex1",
+		Columns:   []string{"id", "created_at"},
+		Unique:    true,
 		Clustered: false,
 	}
 
@@ -182,13 +156,11 @@ func TestDropIndex(t *testing.T) {
 	db := openTestConnection(t)
 
 	res, err := CreateIndex(t.Context(), CreateIndexIn{
-		CreateIndexIn: sqlcommon.CreateIndexIn{
-			Schema:  "dbo",
-			Table:   "orders",
-			Name:    "ix_someindex1",
-			Columns: []string{"id", "created_at"},
-			Unique:  true,
-		},
+		Schema:    "dbo",
+		Table:     "orders",
+		Name:      "ix_someindex1",
+		Columns:   []string{"id", "created_at"},
+		Unique:    true,
 		Clustered: false,
 	}, db)
 
@@ -196,11 +168,9 @@ func TestDropIndex(t *testing.T) {
 	require.True(t, res.Success)
 
 	drop := DropIndexIn{
-		DropIndexIn: sqlcommon.DropIndexIn{
-			Schema: "dbo",
-			Name:   "ix_someindex1",
-		},
-		Table: "orders",
+		Schema: "dbo",
+		Name:   "ix_someindex1",
+		Table:  "orders",
 	}
 
 	ix, err := DropIndex(t.Context(), drop, db)

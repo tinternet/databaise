@@ -17,6 +17,11 @@ func SetupPostgresContainer(t *testing.T) string {
 		postgres.WithDatabase("test"),
 		postgres.WithUsername("user"),
 		postgres.WithPassword("password"),
+		testcontainers.WithCmd(
+			"postgres",
+			"-c", "shared_preload_libraries=pg_stat_statements",
+			"-c", "pg_stat_statements.track=all",
+		),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).WithStartupTimeout(5*time.Second)),

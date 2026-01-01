@@ -11,133 +11,91 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type (
-	ListTablesIn     = sqlcommon.ListTablesIn
-	ListTablesOut    = sqlcommon.ListTablesOut
-	DescribeTableIn  = sqlcommon.DescribeTableIn
-	DescribeTableOut = sqlcommon.DescribeTableOut
-	ExecuteQueryIn   = sqlcommon.ExecuteQueryIn
-	ExecuteQueryOut  = sqlcommon.ExecuteQueryOut
-	CreateIndexOut   = sqlcommon.CreateIndexOut
-	DropIndexOut     = sqlcommon.DropIndexOut
-)
-
-type DropIndexIn struct {
-	sqlcommon.DropIndexIn
-	Table string `json:"table" jsonschema:"The name of the table the index is on,required"`
+// Table represents a database table with schema.
+type Table struct {
+	Schema string `json:"schema" jsonschema:"The schema name"`
+	Name   string `json:"name" jsonschema:"The table name"`
 }
 
-type CreateIndexIn struct {
-	sqlcommon.CreateIndexIn
-	Clustered bool `json:"clustered" jsonschema:"Whether to create a clustered index,required"`
+// ListTablesIn is the input for the list_tables tool.
+type ListTablesIn struct {
+	Schema string `json:"schema,omitempty" jsonschema:"Schema to list tables from"`
 }
 
-const listTablesQuery = `
-	SELECT TABLE_SCHEMA as [schema], TABLE_NAME as name
-	FROM INFORMATION_SCHEMA.TABLES
-	WHERE TABLE_SCHEMA = CASE @schema WHEN '' THEN TABLE_SCHEMA ELSE @schema END AND TABLE_TYPE = 'BASE TABLE'
-	ORDER BY TABLE_NAME
-`
+// ListTablesOut is the output for the list_tables tool.
+type ListTablesOut struct {
+	Tables []Table `json:"tables" jsonschema:"The list of tables"`
+}
 
-const listColumnsQuery = `
-	SELECT
-		COLUMN_NAME as name,
-		DATA_TYPE as database_type,
-		CASE WHEN IS_NULLABLE = 'YES' THEN 1 ELSE 0 END as is_nullable,
-		COLUMN_DEFAULT as default_value
-	FROM INFORMATION_SCHEMA.COLUMNS
-	WHERE TABLE_SCHEMA = CASE @schema WHEN '' THEN TABLE_SCHEMA ELSE @schema END AND TABLE_NAME = @table
-	ORDER BY ORDINAL_POSITION
-`
-
-//go:embed list_indexes.sql
-var listIndexesQuery string
+//go:embed list_tables.sql
+var listTablesQuery string
 
 func ListTables(ctx context.Context, in ListTablesIn, db DB) (out ListTablesOut, err error) {
 	err = db.WithContext(ctx).Raw(listTablesQuery, sql.Named("schema", in.Schema)).Scan(&out.Tables).Error
 	return
 }
 
+// DescribeTableIn is the input for the describe_table tool.
+type DescribeTableIn struct {
+	Schema string `json:"schema" jsonschema:"The schema the table is in,required"`
+	Table  string `json:"table" jsonschema:"The name of the table to describe,required"`
+}
+
+// DescribeTableOut is the output for the describe_table tool.
+type DescribeTableOut struct {
+	CreateTable       string   `json:"create_table" jsonschema:"The CREATE TABLE statement for this table"`
+	CreateIndexes     []string `json:"create_indexes,omitempty" jsonschema:"CREATE INDEX statements for indexes on this table"`
+	CreateConstraints []string `json:"create_constraints,omitempty" jsonschema:"CREATE CONSTRAINT statements for constraints on this table"`
+}
+
+//go:embed ddl_table.sql
+var ddlTableQuery string
+
+//go:embed ddl_indexes.sql
+var ddlIndexesQuery string
+
+//go:embed ddl_constraints.sql
+var ddlConstraintsQuery string
+
 func DescribeTable(ctx context.Context, in DescribeTableIn, db DB) (*DescribeTableOut, error) {
-	out := DescribeTableOut{Schema: in.Schema, Name: in.Table}
+	var result DescribeTableOut
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(2)
 	g.Go(func() error {
-		return db.WithContext(ctx).Raw(listColumnsQuery, sql.Named("schema", in.Schema), sql.Named("table", in.Table)).Scan(&out.Columns).Error
+		return db.WithContext(ctx).Raw(ddlTableQuery, in.Table, in.Schema).Scan(&result.CreateTable).Error
 	})
 	g.Go(func() error {
-		return db.WithContext(ctx).Raw(listIndexesQuery, sql.Named("schema", in.Schema), sql.Named("table", in.Table)).Scan(&out.Indexes).Error
+		return db.WithContext(ctx).Raw(ddlIndexesQuery, in.Table, in.Schema).Scan(&result.CreateIndexes).Error
+	})
+	g.Go(func() error {
+		st := fmt.Sprintf("%s.%s", in.Schema, in.Table)
+		return db.WithContext(ctx).Raw(ddlConstraintsQuery, st, in.Table, in.Schema).Scan(&result.CreateConstraints).Error
 	})
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	if len(out.Columns) == 0 {
+	if result.CreateTable == "" {
 		return nil, sqlcommon.ErrTableNotFound
 	}
-	return &out, nil
+	return &result, nil
 }
+
+type (
+	ExecuteQueryIn  = sqlcommon.ExecuteQueryIn
+	ExecuteQueryOut = sqlcommon.ExecuteQueryOut
+)
 
 func ExecuteQuery(ctx context.Context, in ExecuteQueryIn, db DB) (out ExecuteQueryOut, err error) {
 	err = db.WithContext(ctx).Raw(in.Query).Scan(&out.Rows).Error
 	return
 }
 
-func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut, error) {
-	if len(in.Columns) == 0 {
-		return nil, fmt.Errorf("at least one column is required to create an index")
-	}
-
-	schema := in.Schema
-	if schema == "" {
-		schema = "dbo"
-	}
-
-	unique := ""
-	if in.Unique {
-		unique = "UNIQUE"
-	}
-
-	clustered := "NONCLUSTERED"
-	if in.Clustered {
-		clustered = "CLUSTERED"
-	}
-
-	exprs := make([]clause.Expression, len(in.Columns))
-	for i, col := range in.Columns {
-		exprs[i] = clause.Expr{SQL: "?", Vars: []any{clause.Column{Name: col}}}
-	}
-
-	err := db.WithContext(ctx).Exec(
-		fmt.Sprintf("CREATE %s %s INDEX ? ON ?.? (?)", unique, clustered),
-		clause.Column{Name: in.Name},
-		clause.Table{Name: schema},
-		clause.Table{Name: in.Table},
-		clause.CommaExpression{Exprs: exprs},
-	).Error
-	if err != nil {
-		return nil, err
-	}
-	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s.%s", in.Name, schema, in.Table)}, nil
-}
-
-func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error) {
-	err := db.WithContext(ctx).Exec(
-		"DROP INDEX ? ON ?.?",
-		clause.Column{Name: in.Name},
-		clause.Table{Name: in.Schema},
-		clause.Table{Name: in.Table},
-	).Error
-	if err != nil {
-		return nil, err
-	}
-	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s on %s.%s", in.Name, in.Schema, in.Table)}, nil
-}
-
+// ExplainQueryIn is the input for the explain_query tool.
 type ExplainQueryIn struct {
 	Query               string `json:"query" jsonschema:"The SQL query to explain,required"`
 	ActualExecutionPlan bool   `json:"actual_execution_plan,omitempty" jsonschema:"Whether to execute the query and get the actual execution plan"`
 }
 
+// ExplainQueryOut is the output for the explain_query tool.
 type ExplainQueryOut struct {
 	Plan string           `json:"plan" jsonschema:"The execution plan for the query in XML format"`
 	Rows []map[string]any `json:"rows,omitempty" jsonschema:"The result rows if actual_execution_plan is true"`
@@ -199,13 +157,87 @@ func ExplainQuery(ctx context.Context, in ExplainQueryIn, db DB) (*ExplainQueryO
 	return &ExplainQueryOut{Plan: plan, Rows: results}, nil
 }
 
-//go:embed missing_indexes.sql
-var missingIndexesQuery string
-
-type MissingIndexesOut struct {
-	Indexes []IndexRecommendation `json:"indexes" jsonschema:"List of missing indexes with details"`
+// CreateIndexIn is the input for the create_index tool.
+type CreateIndexIn struct {
+	Schema    string   `json:"schema" jsonschema:"The schema the table is in,required"`
+	Table     string   `json:"table" jsonschema:"The table to create the index on,required"`
+	Name      string   `json:"name" jsonschema:"The name of the index,required"`
+	Columns   []string `json:"columns" jsonschema:"The columns to include in the index,required"`
+	Unique    bool     `json:"unique" jsonschema:"Whether to create a unique index,required"`
+	Clustered bool     `json:"clustered" jsonschema:"Whether to create a clustered index,required"`
 }
 
+// CreateIndexOut is the output for the create_index tool.
+type CreateIndexOut struct {
+	Success bool   `json:"success" jsonschema:"Whether the index was created successfully"`
+	Message string `json:"message,omitempty" jsonschema:"A message describing the result"`
+}
+
+func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut, error) {
+	if len(in.Columns) == 0 {
+		return nil, fmt.Errorf("at least one column is required to create an index")
+	}
+
+	schema := in.Schema
+	if schema == "" {
+		schema = "dbo"
+	}
+
+	unique := ""
+	if in.Unique {
+		unique = "UNIQUE"
+	}
+
+	clustered := "NONCLUSTERED"
+	if in.Clustered {
+		clustered = "CLUSTERED"
+	}
+
+	exprs := make([]clause.Expression, len(in.Columns))
+	for i, col := range in.Columns {
+		exprs[i] = clause.Expr{SQL: "?", Vars: []any{clause.Column{Name: col}}}
+	}
+
+	err := db.WithContext(ctx).Exec(
+		fmt.Sprintf("CREATE %s %s INDEX ? ON ?.? (?)", unique, clustered),
+		clause.Column{Name: in.Name},
+		clause.Table{Name: schema},
+		clause.Table{Name: in.Table},
+		clause.CommaExpression{Exprs: exprs},
+	).Error
+	if err != nil {
+		return nil, err
+	}
+	return &CreateIndexOut{Success: true, Message: fmt.Sprintf("Created index %s on %s.%s", in.Name, schema, in.Table)}, nil
+}
+
+// DropIndexIn is the input for the drop_index tool.
+type DropIndexIn struct {
+	Schema string `json:"schema" jsonschema:"The schema the index is in,required"`
+	Name   string `json:"name" jsonschema:"The name of the index to drop,required"`
+	Table  string `json:"table" jsonschema:"The name of the table the index is on,required"`
+}
+
+// DropIndexOut is the output for the drop_index tool.
+type DropIndexOut struct {
+	Success bool   `json:"success" jsonschema:"Whether the index was dropped successfully"`
+	Message string `json:"message,omitempty" jsonschema:"A message describing the result"`
+}
+
+func DropIndex(ctx context.Context, in DropIndexIn, db DB) (*DropIndexOut, error) {
+	err := db.WithContext(ctx).Exec(
+		"DROP INDEX ? ON ?.?",
+		clause.Column{Name: in.Name},
+		clause.Table{Name: in.Schema},
+		clause.Table{Name: in.Table},
+	).Error
+	if err != nil {
+		return nil, err
+	}
+	return &DropIndexOut{Success: true, Message: fmt.Sprintf("Dropped index %s on %s.%s", in.Name, in.Schema, in.Table)}, nil
+}
+
+// IndexRecommendation represents a missing index recommendation.
 type IndexRecommendation struct {
 	AverageEstimatedImpact float64 `json:"average_estimated_impact" jsonschema:"The average estimated impact score of the missing index"`
 	CreateStatement        string  `json:"create_statement" jsonschema:"The CREATE INDEX statement to create the missing index"`
@@ -213,15 +245,20 @@ type IndexRecommendation struct {
 	TableName              string  `json:"table_name" jsonschema:"The name of the table on which the index is recommended"`
 }
 
+// MissingIndexesOut is the output for the list_missing_indexes tool.
+type MissingIndexesOut struct {
+	Indexes []IndexRecommendation `json:"indexes" jsonschema:"List of missing indexes with details"`
+}
+
+//go:embed missing_indexes.sql
+var missingIndexesQuery string
+
 func ListMissingIndexes(ctx context.Context, _ struct{}, db DB) (out MissingIndexesOut, err error) {
 	err = db.WithContext(ctx).Raw(missingIndexesQuery).Scan(&out.Indexes).Error
 	return
 }
 
-type WaitingQueriesOut struct {
-	Queries []WaitingQuery `json:"queries" jsonschema:"List of currently waiting queries"`
-}
-
+// WaitingQuery represents a currently waiting query.
 type WaitingQuery struct {
 	StartTime    string `json:"start_time" jsonschema:"The time when the query started execution"`
 	QueryText    string `json:"query_text" jsonschema:"The SQL text of the waiting query"`
@@ -233,6 +270,11 @@ type WaitingQuery struct {
 	LastWaitType string `json:"last_wait_type" jsonschema:"The last wait type experienced by the query"`
 }
 
+// WaitingQueriesOut is the output for the list_waiting_queries tool.
+type WaitingQueriesOut struct {
+	Queries []WaitingQuery `json:"queries" jsonschema:"List of currently waiting queries"`
+}
+
 //go:embed list_waiting_queries.sql
 var waitingQueriesSQL string
 
@@ -241,10 +283,7 @@ func ListWaitingQueries(ctx context.Context, _ struct{}, db DB) (out WaitingQuer
 	return
 }
 
-type SlowestQueriesOut struct {
-	Queries []SlowestQuery `json:"queries" jsonschema:"List of slowest queries by total elapsed time"`
-}
-
+// SlowestQuery represents a slow query.
 type SlowestQuery struct {
 	StatementText      string `json:"statement_text" jsonschema:"The SQL text of the query"`
 	WaitType           string `json:"wait_type" jsonschema:"The wait type of the query"`
@@ -259,6 +298,11 @@ type SlowestQuery struct {
 	AvgElapsedTime     int    `json:"avg_elapsed_time" jsonschema:"The average elapsed time in milliseconds per execution of the query"`
 }
 
+// SlowestQueriesOut is the output for the list_slowest_queries tool.
+type SlowestQueriesOut struct {
+	Queries []SlowestQuery `json:"queries" jsonschema:"List of slowest queries by total elapsed time"`
+}
+
 //go:embed list_slowest_queries.sql
 var slowestQueriesSQL string
 
@@ -267,13 +311,15 @@ func ListSlowestQueries(ctx context.Context, _ struct{}, db DB) (out SlowestQuer
 	return
 }
 
-type DeadlocksOut struct {
-	Deadlocks []DeadlockInfo `json:"deadlocks" jsonschema:"List of recent deadlocks"`
-}
-
+// DeadlockInfo represents deadlock information.
 type DeadlockInfo struct {
 	DeadlockReport string `json:"deadlock_report" jsonschema:"The XML report of the deadlock"`
 	ExecutionTime  string `json:"execution_time" jsonschema:"The time when the deadlock occurred"`
+}
+
+// DeadlocksOut is the output for the list_deadlocks tool.
+type DeadlocksOut struct {
+	Deadlocks []DeadlockInfo `json:"deadlocks" jsonschema:"List of recent deadlocks"`
 }
 
 //go:embed list_deadlocks.sql

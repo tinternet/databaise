@@ -70,7 +70,8 @@ Each database entry has the following structure:
 
 ### Key Concepts
 
-- **Database Names**: Each database is named (e.g., `netflix`) - this is passed as an argument to tools
+- **Config Keys**: Each database entry is identified by a key (e.g., `netflix`) - this is passed as the `database_name` parameter when calling tools
+- **Backend Types**: The database type (`postgres`, `mysql`, `sqlserver`, `sqlite`) becomes the prefix for all tools (e.g., `postgres_list_tables`)
 - **Descriptions**: Help LLMs understand what data is available
 - **Operation Levels**: Only include `read`, `write`, or `admin` sections for the operations you want to enable
 - **Separate Connections**: Each operation level uses its own DSN/credentials
@@ -102,19 +103,7 @@ Each database entry has the following structure:
 }
 ```
 
-## Running
-
-### Transport Modes
-
-```bash
-# STDIO mode (for MCP clients like Claude Desktop)
-./databaise -transport stdio -config config.json
-
-# HTTP mode
-./databaise -transport http -config config.json -address 0.0.0.0:8888
-```
-
-### Claude Desktop Setup
+## Claude Desktop Setup
 
 Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
@@ -131,25 +120,50 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 ## Available Tools
 
-Tools are registered based on which config sections are present:
-
-| Config Section | Tools Registered |
-|----------------|------------------|
-| `read` | `{db}_list_tables`, `{db}_describe_table`, `{db}_read_query` |
-| `write` | *Planned* |
-| `admin` | `{db}_create_index`, `{db}_drop_index`, `{db}_explain_query` |
-
-### Backend-Specific Admin Tools
-
-If the backend type is `sqlserver`, the admin section includes these additional diagnostic tools:
-
-- `sqlserver_list_missing_indexes` - identify indexes suggested by the query optimizer
-- `sqlserver_list_waiting_queries` - inspect queries currently blocked or waiting
-- `sqlserver_list_slowest_queries` - retrieve top resource-consuming queries
-- `sqlserver_list_deadlocks` - analyze recent deadlock events
+Tools are registered based on which config sections are present. All tools use the pattern `{backend}_{tool_name}` where `{backend}` is the database type (e.g., `postgres_list_tables`, `mysql_read_query`). The config key (e.g., `netflix`) is passed as a `database_name` parameter to specify which database to query.
 
 ### Global Tools
 - `list_databases` - List all configured databases with their available tools
+
+### Read Tools
+Available when `read` section is configured:
+- `{backend}_list_tables` - List all tables in the database
+- `{backend}_describe_table` - Get column and index information for a table
+- `{backend}_read_query` - Execute a read-only SQL query
+
+### Write Tools
+*Planned for future release*
+
+### Admin Tools
+Available when `admin` section is configured:
+
+#### Common Admin Tools (All Backends)
+- `{backend}_create_index` - Create an index on a table
+- `{backend}_drop_index` - Drop an index from a table
+- `{backend}_explain_query` - Get query execution plan
+
+#### DBA Monitoring Tools (SQL Server, PostgreSQL, MySQL)
+Advanced diagnostic tools for production database monitoring:
+
+- `{backend}_list_missing_indexes` - Identify tables that would benefit from additional indexes
+  - **SQL Server**: Uses missing index DMVs with impact scores
+  - **PostgreSQL**: Analyzes sequential scan statistics from pg_stat_user_tables
+  - **MySQL**: Checks performance_schema for full table scans
+
+- `{backend}_list_waiting_queries` - Show queries that are currently blocked or waiting
+  - **SQL Server**: Uses sys.dm_exec_requests with wait types
+  - **PostgreSQL**: Queries pg_stat_activity with wait events and blocking PIDs
+  - **MySQL**: Leverages performance_schema threads and metadata_locks
+
+- `{backend}_list_slowest_queries` - Display the slowest queries by total execution time
+  - **SQL Server**: Queries sys.dm_exec_query_stats
+  - **PostgreSQL**: Requires pg_stat_statements extension
+  - **MySQL**: Uses performance_schema.events_statements_summary_by_digest
+
+- `{backend}_list_deadlocks` - Retrieve information about database deadlocks
+  - **SQL Server**: Extracts deadlock graphs from extended events
+  - **PostgreSQL**: Shows deadlock counts from pg_stat_database
+  - **MySQL**: Displays most recent deadlock from SHOW ENGINE INNODB STATUS
 
 ## Security Model
 

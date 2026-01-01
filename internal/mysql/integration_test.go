@@ -1,3 +1,5 @@
+//go:build integration
+
 package mysql
 
 import (
@@ -8,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tinternet/databaise/internal/config"
 	"github.com/tinternet/databaise/internal/provision"
-	"github.com/tinternet/databaise/internal/sqlcommon"
 	"github.com/tinternet/databaise/internal/sqltest"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -91,37 +92,16 @@ func TestDescribeTable(t *testing.T) {
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
 		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "orders"}, db)
-
 		require.NoError(t, err)
 		require.NotNil(t, res)
-
-		require.Equal(t, "orders", res.Name)
-
-		columns := []sqlcommon.Column{
-			{Name: "id", DatabaseType: "bigint", IsNullable: false, DefaultValue: nil},
-			{Name: "created_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
-			{Name: "updated_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
-			{Name: "deleted_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
-			{Name: "order_code", DatabaseType: "varchar", IsNullable: false, DefaultValue: nil},
-			{Name: "amount", DatabaseType: "double", IsNullable: false, DefaultValue: nil},
-			{Name: "user_id", DatabaseType: "bigint", IsNullable: false, DefaultValue: nil},
-			{Name: "shipped_at", DatabaseType: "datetime", IsNullable: true, DefaultValue: nil},
-		}
-		require.EqualValues(t, columns, res.Columns)
-
-		indexes := []sqlcommon.Index{
-			{Name: "PRIMARY", Definition: "CREATE UNIQUE INDEX PRIMARY ON orders (id)"},
-			{Name: "idx_orders_deleted_at", Definition: "CREATE NONUNIQUEINDEX idx_orders_deleted_at ON orders (deleted_at)"},
-			{Name: "idx_orders_order_code", Definition: "CREATE UNIQUE INDEX idx_orders_order_code ON orders (order_code)"},
-			{Name: "idx_orders_user_id", Definition: "CREATE NONUNIQUEINDEX idx_orders_user_id ON orders (user_id)"},
-		}
-		require.EqualValues(t, indexes, res.Indexes)
+		require.Contains(t, res.CreateTable, "CREATE TABLE")
+		require.Contains(t, res.CreateTable, "KEY") // indexes are included in the table DDL
 	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
 		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "nonexistend"}, db)
 		require.Nil(t, res)
-		require.ErrorIs(t, sqlcommon.ErrTableNotFound, err)
+		require.ErrorContains(t, err, "doesn't exist")
 	})
 }
 
@@ -218,6 +198,42 @@ func TestExplainQuery(t *testing.T) {
 		require.Nil(t, res)
 		require.ErrorContains(t, err, "You have an error in your SQL")
 	})
+}
+
+func TestListMissingIndexes(t *testing.T) {
+	t.Parallel()
+	db := openTestConnection(t)
+
+	_, err := ListMissingIndexes(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+}
+
+func TestListWaitingQueries(t *testing.T) {
+	t.Parallel()
+	db := openTestConnection(t)
+
+	_, err := ListWaitingQueries(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+}
+
+func TestListSlowestQueries(t *testing.T) {
+	t.Parallel()
+	db := openTestConnection(t)
+
+	res, err := ListSlowestQueries(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NotNil(t, res.Queries)
+}
+
+func TestListDeadlocks(t *testing.T) {
+	t.Parallel()
+	db := openTestConnection(t)
+
+	res, err := ListDeadlocks(t.Context(), struct{}{}, db)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NotNil(t, res.DeadlockInfo)
 }
 
 func ptr[T any](v T) *T {

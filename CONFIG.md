@@ -16,24 +16,16 @@ Each database entry has the following structure:
 }
 ```
 
-### Database Name
+### Config Key (Database Identifier)
 
-The key (e.g., `"netflix"`, `"store"`) identifies the database instance. This name is passed to tools via the `database_name` parameter to route queries to the correct database. Choose meaningful names:
+The key (e.g., `"netflix"`, `"store"`) identifies the database instance in your configuration. This key is passed as the `database_name` parameter when calling tools to specify which database to query. Choose meaningful names:
 
 - **Good:** `netflix`, `store`, `analytics`, `users`
 - **Bad:** `db1`, `my_database`, `test`
 
 ### Description
 
-The description helps the LLM understand what data is available. Tool names are prefixed by the backend type (e.g., `postgres_`, `sqlite_`, `sqlserver_`), with descriptions like:
-
-```
-postgres_read_query
-  "[PostgreSQL] Execute a read-only SQL query."
-
-sqlserver_read_query
-  "[T-SQL] Execute a read-only SQL query."
-```
+The description helps the LLM understand what data is available in this database. It is returned by the `list_databases` tool to help the LLM choose which database to query.
 
 **Good descriptions:**
 - `"Netflix shows and movies catalog"`
@@ -42,7 +34,7 @@ sqlserver_read_query
 
 **Bad descriptions:**
 - `"My database"` (not helpful)
-- `"PostgreSQL database"` (redundant)
+- `"PostgreSQL database"` (describes the backend, not the data)
 
 ### Backends
 
@@ -55,15 +47,9 @@ sqlserver_read_query
 
 ### Operation Levels
 
-Tools are registered based on which keys are present:
+Only include the sections you want to enable (`read`, `write`, `admin`). Each operation level uses its own DSN/credentials for security isolation.
 
-| Config Key | Tools Registered | Purpose |
-|------------|------------------|---------|
-| `read` | `list_tables`, `describe_table`, `read_query` | Read-only operations |
-| `write` | *Planned* | INSERT, UPDATE, DELETE |
-| `admin` | `create_index` | Maintenance operations |
-
-Only include the sections you want to enable. Omit a section to disable those tools.
+For the complete list of available tools by operation level, see the [Available Tools](README.md#available-tools) section in README.md.
 
 ---
 
