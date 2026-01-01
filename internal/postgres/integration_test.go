@@ -15,7 +15,7 @@ import (
 func openTestConnection(t *testing.T) DB {
 	t.Helper()
 	dsn := sqltest.SetupPostgresContainer(t)
-	db, err := Connector{}.ConnectAdmin(config.AdminConfig{DSN: dsn})
+	db, err := Connector{}.ConnectAdmin(AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}})
 	sqltest.Seed(t, db.DB)
 	require.NoError(t, err)
 	return db
@@ -59,14 +59,14 @@ func TestConnect(t *testing.T) {
 
 	t.Run("Write", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectWrite(config.WriteConfig{DSN: dsn})
+		db, err := Connector{}.ConnectWrite(WriteConfig{WriteConfig: config.WriteConfig{DSN: dsn}})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("Admin", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectAdmin(config.AdminConfig{DSN: dsn})
+		db, err := Connector{}.ConnectAdmin(AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
@@ -234,7 +234,7 @@ func TestReadonlyTransactionEnforcement(t *testing.T) {
 	t.Parallel()
 
 	dsn := sqltest.SetupPostgresContainer(t)
-	adm, err := Connector{}.ConnectAdmin(config.AdminConfig{DSN: dsn})
+	adm, err := Connector{}.ConnectAdmin(AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}})
 	require.NoError(t, err)
 	sqltest.Seed(t, adm.DB)
 	db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn}, UseReadonlyTx: true})

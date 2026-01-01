@@ -4,21 +4,22 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tinternet/databaise/internal/config"
 )
 
 func TestExtractDatabaseName(t *testing.T) {
-	t.Run("Nil value", func(t *testing.T) {
-		require.NoError(t, extractDatabaseName(nil, make(map[string]bool)))
-	})
 	t.Run("Malformed dsn", func(t *testing.T) {
-		cfg := ReadConfig{DSN: "dsadsads"}
-		err := extractDatabaseName(cfg, make(map[string]bool))
+		_, err := extractMySQLDatabaseName("dsadsads")
 		require.ErrorContains(t, err, "could not parse mysql dsn")
 	})
 	t.Run("No database specified", func(t *testing.T) {
-		cfg := ReadConfig{DSN: "root:test@tcp(localhost:5000)/?param=true"}
-		err := extractDatabaseName(cfg, make(map[string]bool))
+		_, err := extractMySQLDatabaseName("root:test@tcp(localhost:5000)/?param=true")
 		require.ErrorContains(t, err, "database not specified")
+	})
+	t.Run("Valid DSN", func(t *testing.T) {
+		dbName, err := extractMySQLDatabaseName("root:test@tcp(localhost:5000)/testdb?param=true")
+		require.NoError(t, err)
+		require.Equal(t, "testdb", dbName)
 	})
 }
 
@@ -37,33 +38,22 @@ func TestEnableParseTimeParam(t *testing.T) {
 	})
 }
 
-func TestValidateConfig(t *testing.T) {
+func TestGetDatabaseIdentifier(t *testing.T) {
 	t.Run("Same database", func(t *testing.T) {
 		dsn := "root:test@tcp(localhost:5000)/test?multiStatements=true&parseTime=true"
-		r := ReadConfig{DSN: dsn}
-		w := WriteConfig{DSN: dsn}
-		a := AdminConfig{DSN: dsn}
-		require.NoError(t, Connector{}.ValidateConfig(&r, &w, &a))
-	})
-	t.Run("Different read database", func(t *testing.T) {
-		dsn := "root:test@tcp(localhost:5000)/test?multiStatements=true&parseTime=true"
-		r := ReadConfig{DSN: "oot:test@tcp(localhost:5000)/different?multiStatements=true&parseTime=true"}
-		w := WriteConfig{DSN: dsn}
-		a := AdminConfig{DSN: dsn}
-		require.Error(t, Connector{}.ValidateConfig(&r, &w, &a))
-	})
-	t.Run("Different write database", func(t *testing.T) {
-		dsn := "root:test@tcp(localhost:5000)/test?multiStatements=true&parseTime=true"
-		r := ReadConfig{DSN: dsn}
-		w := WriteConfig{DSN: "oot:test@tcp(localhost:5000)/different?multiStatements=true&parseTime=true"}
-		a := AdminConfig{DSN: dsn}
-		require.Error(t, Connector{}.ValidateConfig(&r, &w, &a))
-	})
-	t.Run("Different admin database", func(t *testing.T) {
-		dsn := "root:test@tcp(localhost:5000)/test?multiStatements=true&parseTime=true"
-		r := ReadConfig{DSN: dsn}
-		w := WriteConfig{DSN: dsn}
-		a := AdminConfig{DSN: "oot:test@tcp(localhost:5000)/different?multiStatements=true&parseTime=true"}
-		require.Error(t, Connector{}.ValidateConfig(&r, &w, &a))
+		r := ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn}}
+		w := WriteConfig{WriteConfig: config.WriteConfig{DSN: dsn}}
+		a := AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}}
+
+		rID, err := r.GetDatabaseIdentifier()
+		require.NoError(t, err)
+		wID, err := w.GetDatabaseIdentifier()
+		require.NoError(t, err)
+		aID, err := a.GetDatabaseIdentifier()
+		require.NoError(t, err)
+
+		require.Equal(t, "test", rID)
+		require.Equal(t, rID, wID)
+		require.Equal(t, rID, aID)
 	})
 }

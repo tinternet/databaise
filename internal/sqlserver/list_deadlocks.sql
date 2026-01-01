@@ -1,3 +1,5 @@
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED -- ironically, the query to list deadlocks deadlocks itself
+
 SELECT 
     XEvent.query('(event/data/value/deadlock)[1]') AS DeadlockGraph
 FROM (

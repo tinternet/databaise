@@ -17,73 +17,41 @@ var log = logging.New("sqlite")
 type DB = *gorm.DB
 
 type SqliteConfig struct {
-	// Path is the path to the SQLite database file.
 	Path string `json:"path"`
 }
 
-type ReadConfig = SqliteConfig
-type WriteConfig = SqliteConfig
-type AdminConfig = SqliteConfig
-
-type Connector struct{}
-
-func getDatabaseName(dsn string) (string, error) {
-	path, err := filepath.Abs(dsn)
+// GetDatabaseIdentifier returns the absolute path of the SQLite database file.
+func (c SqliteConfig) GetDatabaseIdentifier() (string, error) {
+	path, err := filepath.Abs(c.Path)
 	if err != nil {
-		return "", fmt.Errorf("could not get db name: %w", err)
+		return "", fmt.Errorf("could not get database identifier: %w", err)
 	}
+
+	// Strip query parameters if present
 	parts := strings.Split(path, "?")
 	if len(parts) > 2 {
-		return "", errors.New("malformed dsn")
+		return "", errors.New("malformed path")
 	}
+
 	return parts[0], nil
 }
 
-func (c Connector) ValidateConfig(r *ReadConfig, w *WriteConfig, a *AdminConfig) error {
-	m := make(map[string]bool)
+type Connector struct{}
 
-	if r != nil {
-		if readDB, err := getDatabaseName(r.Path); err != nil {
-			return err
-		} else {
-			m[readDB] = true
-		}
-	}
-	if w != nil {
-		if writeDB, err := getDatabaseName(w.Path); err != nil {
-			return err
-		} else {
-			m[writeDB] = true
-		}
-	}
-	if a != nil {
-		if adminDB, err := getDatabaseName(a.Path); err != nil {
-			return err
-		} else {
-			m[adminDB] = true
-		}
-	}
-
-	if len(m) > 1 {
-		return errors.New("read, write, admin configs must point to the same database")
-	}
-
-	return nil
-}
-
-func (c Connector) ConnectRead(cfg ReadConfig) (DB, error) {
+func (c Connector) ConnectRead(cfg SqliteConfig) (DB, error) {
 	dsn := fmt.Sprintf("%s?mode=ro", cfg.Path)
 	log.Printf("Opening readonly connection [path=%s]", cfg.Path)
 	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
-func (c Connector) ConnectWrite(cfg WriteConfig) (DB, error) {
+func (c Connector) ConnectWrite(cfg SqliteConfig) (DB, error) {
 	dsn := fmt.Sprintf("%s?mode=rw", cfg.Path)
 	log.Printf("Opening read-write connection [path=%s]", cfg.Path)
 	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logging.NewGormLogger()})
 }
 
-func (c Connector) ConnectAdmin(cfg AdminConfig) (DB, error) {
+func (c Connector) ConnectAdmin(cfg SqliteConfig) (DB, error) {
+	// TODO: check whether ConnectWrite and ConnectAdmin can cause race conditions
 	dsn := fmt.Sprintf("%s?mode=rw", cfg.Path)
 	log.Printf("Opening admin connection [path=%s]", cfg.Path)
 	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logging.NewGormLogger()})

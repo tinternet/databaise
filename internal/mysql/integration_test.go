@@ -42,35 +42,35 @@ func TestConnect(t *testing.T) {
 		// MySql needs grant to the database
 		require.NoError(t, provisioner.GrantReadOnly(t.Context(), "testuser", provision.AccessScope{Groups: []string{"test"}}))
 		rodsn := setCredentials(t, dsn, "testuser", "testpass")
-		db, err := Connector{}.ConnectRead(ReadConfig{DSN: rodsn})
+		db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: rodsn}})
 		require.NoError(t, err)
 		require.NotNil(t, db)
 	})
 
 	t.Run("ReadOnly With EnforceReadonly=true", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn, EnforceReadonly: ptr(true)})
+		db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn, EnforceReadonly: ptr(true)}})
 		require.Nil(t, db)
 		require.ErrorContains(t, err, "read DSN user has write permissions")
 	})
 
 	t.Run("ReadOnly With EnforceReadonly=false", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn, EnforceReadonly: ptr(false)})
+		db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn, EnforceReadonly: ptr(false)}})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("Write", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectWrite(config.WriteConfig{DSN: dsn})
+		db, err := Connector{}.ConnectWrite(WriteConfig{WriteConfig: config.WriteConfig{DSN: dsn}})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("Admin", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectAdmin(config.AdminConfig{DSN: dsn})
+		db, err := Connector{}.ConnectAdmin(AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})

@@ -14,33 +14,47 @@ import (
 
 var log = logging.New("mysql")
 
-type (
-	WriteConfig = config.WriteConfig
-	AdminConfig = config.AdminConfig
-	ReadConfig  = config.ReadConfig
-)
+type ReadConfig struct {
+	config.ReadConfig
+}
+
+type WriteConfig struct {
+	config.WriteConfig
+}
+
+type AdminConfig struct {
+	config.AdminConfig
+}
+
+// GetDatabaseIdentifier extracts the database name from MySQL DSN.
+// MySQL DSN format: user:pass@tcp(host:port)/dbname?params
+func (c ReadConfig) GetDatabaseIdentifier() (string, error) {
+	return extractMySQLDatabaseName(c.DSN)
+}
+
+func (c WriteConfig) GetDatabaseIdentifier() (string, error) {
+	return extractMySQLDatabaseName(c.DSN)
+}
+
+func (c AdminConfig) GetDatabaseIdentifier() (string, error) {
+	return extractMySQLDatabaseName(c.DSN)
+}
+
+func extractMySQLDatabaseName(dsn string) (string, error) {
+	parts := strings.Split(dsn, "/")
+	if len(parts) < 2 {
+		return "", errors.New("could not parse mysql dsn")
+	}
+
+	parts = strings.Split(parts[len(parts)-1], "?")
+	if parts[0] == "" {
+		return "", errors.New("database not specified")
+	}
+
+	return parts[0], nil
+}
 
 type Connector struct{}
-
-func (b Connector) ValidateConfig(r *ReadConfig, w *WriteConfig, a *AdminConfig) error {
-	m := make(map[string]bool)
-
-	if err := extractDatabaseName(r, m); err != nil {
-		return err
-	}
-	if err := extractDatabaseName(w, m); err != nil {
-		return err
-	}
-	if err := extractDatabaseName(a, m); err != nil {
-		return err
-	}
-
-	if len(m) > 1 {
-		return errors.New("read, write, admin configs must point to the same database")
-	}
-
-	return nil
-}
 
 func (b Connector) ConnectRead(cfg ReadConfig) (*gorm.DB, error) {
 	log.Printf("Opening read connection")
@@ -103,26 +117,6 @@ func init() {
 
 func openConnection(dsn string, gormCfg *gorm.Config) (*gorm.DB, error) {
 	return gorm.Open(mysql.Open(dsn), gormCfg)
-}
-
-func extractDatabaseName(c config.DSNConfig, m map[string]bool) error {
-	if c == nil {
-		return nil
-	}
-
-	dsn := c.GetDSN()
-	parts := strings.Split(dsn, "/")
-	if len(parts) < 2 {
-		return errors.New("could not parse mysql dsn")
-	}
-
-	parts = strings.Split(parts[len(parts)-1], "?")
-	if parts[0] == "" {
-		return errors.New("database not specified")
-	}
-
-	m[parts[0]] = true
-	return nil
 }
 
 func enableParseTime(dsn string) string {

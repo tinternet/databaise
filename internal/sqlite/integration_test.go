@@ -26,21 +26,21 @@ func TestConnect(t *testing.T) {
 
 	t.Run("ReadOnly", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectRead(ReadConfig{Path: file})
+		db, err := Connector{}.ConnectRead(SqliteConfig{Path: file})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("Write", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectWrite(WriteConfig{Path: file})
+		db, err := Connector{}.ConnectWrite(SqliteConfig{Path: file})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("Admin", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectAdmin(AdminConfig{Path: file})
+		db, err := Connector{}.ConnectAdmin(SqliteConfig{Path: file})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
@@ -49,7 +49,7 @@ func TestConnect(t *testing.T) {
 func TestListTables(t *testing.T) {
 	t.Parallel()
 
-	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
 	require.NoError(t, err)
 	sqltest.Seed(t, db)
 
@@ -61,7 +61,7 @@ func TestListTables(t *testing.T) {
 func TestDescribeTable(t *testing.T) {
 	t.Parallel()
 
-	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
 	require.NoError(t, err)
 	sqltest.Seed(t, db)
 
@@ -104,7 +104,7 @@ func TestDescribeTable(t *testing.T) {
 
 func TestExecuteQuery(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
 	require.NoError(t, err)
 	sqltest.Seed(t, db)
 
@@ -127,7 +127,7 @@ func TestExecuteQuery(t *testing.T) {
 
 func TestCreateIndex(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
 	require.NoError(t, err)
 	sqltest.Seed(t, db)
 
@@ -152,7 +152,7 @@ func TestCreateIndex(t *testing.T) {
 
 func TestDropIndex(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
 	require.NoError(t, err)
 	sqltest.Seed(t, db)
 
@@ -179,7 +179,7 @@ func TestDropIndex(t *testing.T) {
 
 func TestExplainQuery(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(ReadConfig{Path: createFile(t)})
+	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
 	require.NoError(t, err)
 	sqltest.Seed(t, db)
 

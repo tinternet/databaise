@@ -59,16 +59,43 @@ type Backend[DB any] struct {
 	initRead        func(cfg config.Database) (DB, error)
 	initWrite       func(cfg config.Database) (DB, error)
 	initAdmin       func(cfg config.Database) (DB, error)
+	validate        func(cfg config.Database) error
 }
 
-type Connector[R, W, A, DB any] interface {
-	ValidateConfig(read *R, write *W, admin *A) error
+// DatabaseIdentifier is implemented by config types to provide a unique identifier
+// for validation that read, write, and admin configs point to the same database.
+type DatabaseIdentifier interface {
+	GetDatabaseIdentifier() (string, error)
+}
+
+type Connector[R, W, A DatabaseIdentifier, DB any] interface {
 	ConnectRead(cfg R) (DB, error)
 	ConnectWrite(cfg W) (DB, error)
 	ConnectAdmin(cfg A) (DB, error)
 }
 
-func NewBackend[R, W, A, DB any](name string, c Connector[R, W, A, DB]) Backend[DB] {
+// validateSameDatabase ensures all configs point to the same database.
+// This is a core requirement of the backend system - read, write, and admin
+// connections must operate on the same database.
+func validateSameDatabase(configs ...DatabaseIdentifier) error {
+	m := make(map[string]bool)
+	for _, cfg := range configs {
+		if cfg == nil {
+			continue
+		}
+		id, err := cfg.GetDatabaseIdentifier()
+		if err != nil {
+			return err
+		}
+		m[id] = true
+	}
+	if len(m) > 1 {
+		return fmt.Errorf("read, write, admin configs must point to the same database")
+	}
+	return nil
+}
+
+func NewBackend[R, W, A DatabaseIdentifier, DB any](name string, c Connector[R, W, A, DB]) Backend[DB] {
 	return Backend[DB]{
 		name:      name,
 		tools:     make([]toolDef, 0),
@@ -76,6 +103,39 @@ func NewBackend[R, W, A, DB any](name string, c Connector[R, W, A, DB]) Backend[
 		initRead:  makeConnector(c.ConnectRead, config.Database.ParseReadConfig, "read"),
 		initWrite: makeConnector(c.ConnectWrite, config.Database.ParseWriteConfig, "write"),
 		initAdmin: makeConnector(c.ConnectAdmin, config.Database.ParseAdminConfig, "admin"),
+		validate:  makeValidator[R, W, A](),
+	}
+}
+
+func makeValidator[R, W, A DatabaseIdentifier]() func(config.Database) error {
+	return func(cfg config.Database) error {
+		var identifiers []DatabaseIdentifier
+
+		if cfg.HasRead() {
+			var rCfg R
+			if err := cfg.ParseReadConfig(&rCfg); err != nil {
+				return fmt.Errorf("failed to parse read config: %w", err)
+			}
+			identifiers = append(identifiers, rCfg)
+		}
+
+		if cfg.HasWrite() {
+			var wCfg W
+			if err := cfg.ParseWriteConfig(&wCfg); err != nil {
+				return fmt.Errorf("failed to parse write config: %w", err)
+			}
+			identifiers = append(identifiers, wCfg)
+		}
+
+		if cfg.HasAdmin() {
+			var aCfg A
+			if err := cfg.ParseAdminConfig(&aCfg); err != nil {
+				return fmt.Errorf("failed to parse admin config: %w", err)
+			}
+			identifiers = append(identifiers, aCfg)
+		}
+
+		return validateSameDatabase(identifiers...)
 	}
 }
 
@@ -141,6 +201,11 @@ func Register[DB any](b *Backend[DB]) {
 	registry[b.name] = func(dbName string, cfg config.Database) error {
 		if !cfg.HasAdmin() && !cfg.HasRead() && !cfg.HasWrite() {
 			return fmt.Errorf("database %q has no read, write, or admin configuration", dbName)
+		}
+
+		// Validate that all configs point to the same database
+		if err := b.validate(cfg); err != nil {
+			return fmt.Errorf("database %q validation failed: %w", dbName, err)
 		}
 
 		inst := &instance{
