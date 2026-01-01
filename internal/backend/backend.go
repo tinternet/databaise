@@ -330,29 +330,25 @@ func ListDatabases() ListDatabasesOut {
 
 // Request wraps tool input with database routing
 type Request[In any] struct {
-	DatabaseName string `json:"database_name" jsonschema:"required,The name of the database to operate on."`
-	Payload      In     `json:",inline"`
+	DatabaseName string `jsonschema:"required,The name of the database to operate on."`
+	Payload      In
 }
 
 // UnmarshalJSON implements custom json unmarshaling to support the inline payload
 func (r *Request[In]) UnmarshalJSON(data []byte) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+	var db struct {
+		DatabaseName string `json:"database_name"`
+	}
+	var payload In
+	if err := json.Unmarshal(data, &db); err != nil {
 		return err
 	}
-
-	if dbName, ok := raw["database_name"]; ok {
-		if err := json.Unmarshal(dbName, &r.DatabaseName); err != nil {
-			return err
-		}
-		delete(raw, "database_name")
-	}
-
-	remaining, err := json.Marshal(raw)
-	if err != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return err
 	}
-	return json.Unmarshal(remaining, &r.Payload)
+	r.DatabaseName = db.DatabaseName
+	r.Payload = payload
+	return nil
 }
 
 func init() {
