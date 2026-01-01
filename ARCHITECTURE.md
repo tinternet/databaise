@@ -108,7 +108,7 @@ type Backend[DB any] struct {
 }
 
 // Connector interface for driver-specific connection logic
-type Connector[R, W, A, DB any] interface {
+type Connector[R, W, A DatabaseIdentifier, DB any] interface {
     ConnectRead(cfg R) (DB, error)
     ConnectWrite(cfg W) (DB, error)
     ConnectAdmin(cfg A) (DB, error)
