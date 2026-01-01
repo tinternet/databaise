@@ -104,6 +104,7 @@ type Backend[DB any] struct {
     initRead        func(cfg config.Database) (DB, error)
     initWrite       func(cfg config.Database) (DB, error)
     initAdmin       func(cfg config.Database) (DB, error)
+    validate        func(cfg config.Database) error
 }
 
 // Connector interface for driver-specific connection logic
@@ -113,9 +114,27 @@ type Connector[R, W, A, DB any] interface {
     ConnectAdmin(cfg A) (DB, error)
 }
 
+// DatabaseIdentifier interface for config validation
+type DatabaseIdentifier interface {
+    GetDatabaseIdentifier() (string, error)
+}
+
 // Handler signature for tool implementations
 type Handler[In, Out, DB any] func(context.Context, In, DB) (Out, error)
 ```
+
+### Config Validation
+
+The backend system enforces that read, write, and admin configs must point to the same database. This is a core requirement - you cannot have separate databases for different operation levels.
+
+Each backend implements `GetDatabaseIdentifier()` on its config types to extract the database name:
+
+- **Postgres**: Extracts `/dbname` from `postgres://user:pass@host:port/dbname`
+- **MySQL**: Parses `user:pass@tcp(host)/dbname` format
+- **SQL Server**: Extracts `?database=name` query parameter
+- **SQLite**: Uses absolute file path
+
+The validation happens automatically during `backend.Init()` before any connections are made.
 
 ### Tool registration
 
