@@ -98,6 +98,10 @@ func ExecuteQuery(ctx context.Context, in ExecuteQueryIn, db DB) (out ExecuteQue
 }
 
 func CreateIndex(ctx context.Context, in CreateIndexIn, db DB) (*CreateIndexOut, error) {
+	if len(in.Columns) == 0 {
+		return nil, fmt.Errorf("at least one column is required to create an index")
+	}
+
 	unique := ""
 	if in.Unique {
 		unique = "UNIQUE"

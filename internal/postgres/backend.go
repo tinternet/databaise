@@ -50,7 +50,7 @@ func (b Connector) ConnectRead(cfg ReadConfig) (DB, error) {
 	}
 
 	if cfg.UseReadonlyTx {
-		log.Println("Using postgres readonly trasnactions with prepared statements (use_readonly_tx: true)")
+		log.Println("Using postgres readonly transactions with prepared statements (use_readonly_tx: true)")
 		return db, nil
 	}
 

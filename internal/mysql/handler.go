@@ -92,6 +92,10 @@ type CreateIndexIn struct {
 }
 
 func CreateIndex(ctx context.Context, in CreateIndexIn, db *gorm.DB) (*CreateIndexOut, error) {
+	if len(in.Columns) == 0 {
+		return nil, fmt.Errorf("at least one column is required to create an index")
+	}
+
 	unique := ""
 	if in.Unique {
 		unique = "UNIQUE "
