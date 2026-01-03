@@ -1,5 +1,3 @@
-SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED -- ironically, the query to list deadlocks deadlocks itself
-
 SELECT 
     XEvent.query('(event/data/value/deadlock)[1]') AS DeadlockGraph
 FROM (
@@ -18,43 +16,42 @@ FROM (
         AS XEventData(XEvent)
 ) AS source;
 
+-- CREATE TABLE #errorlog (
+--     LogDate      DATETIME,
+--     ProcessInfo  VARCHAR(100),
+--     [Text]       VARCHAR(MAX)
+-- );
 
-CREATE TABLE #errorlog (
-    LogDate      DATETIME,
-    ProcessInfo  VARCHAR(100),
-    [Text]       VARCHAR(MAX)
-);
+-- DECLARE @tag  VARCHAR(MAX),
+--         @path VARCHAR(MAX);
 
-DECLARE @tag  VARCHAR(MAX),
-        @path VARCHAR(MAX);
+-- INSERT INTO #errorlog
+-- EXEC sp_readerrorlog;
 
-INSERT INTO #errorlog
-EXEC sp_readerrorlog;
+-- SELECT @tag = [Text]
+-- FROM #errorlog
+-- WHERE [Text] LIKE 'Logging%MSSQL\Log%';
 
-SELECT @tag = [Text]
-FROM #errorlog
-WHERE [Text] LIKE 'Logging%MSSQL\Log%';
-
-DROP TABLE #errorlog;
-
-
-SET @path = SUBSTRING(
-    @tag,
-    38,
-    CHARINDEX('MSSQL\Log', @tag) - 29
-);
+-- DROP TABLE #errorlog;
 
 
-SELECT 
-    CONVERT(XML, event_data).query('/event/data/value/child::*') AS deadlock_report,
-    CONVERT(XML, event_data).value(
-        '(event[@name="xml_deadlock_report"]/@timestamp)[1]',
-        'datetime'
-    ) AS execution_time
-FROM sys.fn_xe_file_target_read_file(
-        @path + '\system_health*.xel',
-        NULL,
-        NULL,
-        NULL
-     )
-WHERE OBJECT_NAME LIKE 'xml_deadlock_report';
+-- SET @path = SUBSTRING(
+--     @tag,
+--     38,
+--     CHARINDEX('MSSQL\Log', @tag) - 29
+-- );
+
+
+-- SELECT 
+--     CONVERT(XML, event_data).query('/event/data/value/child::*') AS deadlock_report,
+--     CONVERT(XML, event_data).value(
+--         '(event[@name="xml_deadlock_report"]/@timestamp)[1]',
+--         'datetime'
+--     ) AS execution_time
+-- FROM sys.fn_xe_file_target_read_file(
+--         @path + '\system_health*.xel',
+--         NULL,
+--         NULL,
+--         NULL
+--      )
+-- WHERE OBJECT_NAME LIKE 'xml_deadlock_report';

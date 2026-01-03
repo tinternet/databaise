@@ -120,6 +120,9 @@ var queryConstraintsDDL string
 func (b *Backend) DescribeTable(ctx context.Context, in backend.DescribeTableIn) (*backend.TableDescription, error) {
 	var out backend.TableDescription
 	g, ctx := errgroup.WithContext(ctx)
+	if in.Schema == "" {
+		in.Schema = "public"
+	}
 	tableName := fmt.Sprintf("%s.%s", in.Schema, in.Table)
 
 	g.Go(func() error {

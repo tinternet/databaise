@@ -287,8 +287,7 @@ var deadlocksQuery string
 
 func (b *Backend) ListDeadlocks(ctx context.Context) ([]backend.Deadlock, error) {
 	var deadlocks []struct {
-		DeadlockReport string `gorm:"column:deadlock_report"`
-		ExecutionTime  string `gorm:"column:execution_time"`
+		DeadlockReport string `gorm:"column:DeadlockGraph"`
 	}
 	if err := b.db.WithContext(ctx).Raw(deadlocksQuery).Scan(&deadlocks).Error; err != nil {
 		return nil, err
@@ -298,7 +297,7 @@ func (b *Backend) ListDeadlocks(ctx context.Context) ([]backend.Deadlock, error)
 	for i, d := range deadlocks {
 		result[i] = backend.Deadlock{
 			Details:   d.DeadlockReport,
-			Timestamp: d.ExecutionTime,
+			Timestamp: "",
 		}
 	}
 	return result, nil

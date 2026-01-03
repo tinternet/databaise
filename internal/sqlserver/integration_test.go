@@ -76,6 +76,12 @@ func TestDescribeTable(t *testing.T) {
 			return strings.Contains(v, "ADD CONSTRAINT")
 		}))
 	})
+	t.Run("MissingSchema", func(t *testing.T) {
+		t.Parallel()
+		res, err := b.DescribeTable(t.Context(), backend.DescribeTableIn{Schema: "", Table: "orders"})
+		require.NoError(t, err)
+		require.NotNil(t, res)
+	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
 		res, err := b.DescribeTable(t.Context(), backend.DescribeTableIn{Schema: "dbo", Table: "nonexistent"})

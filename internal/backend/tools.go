@@ -86,7 +86,7 @@ func ListDatabases() ListDatabasesOut {
 }
 
 func init() {
-	server.AddTool(func(ctx context.Context, in struct{}) (ListDatabasesOut, error) {
+	server.AddTool(func(ctx context.Context, in any) (ListDatabasesOut, error) {
 		return ListDatabases(), nil
 	}, server.Tool{
 		Name:        "list_databases",

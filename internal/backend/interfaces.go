@@ -90,7 +90,7 @@ type ReadQueryIn struct {
 
 type ExplainQueryIn struct {
 	Query   string `json:"query" jsonschema:"required,The SQL query to explain"`
-	Analyze bool   `json:"analyze,omitempty" jsonschema:"Execute the query for actual runtime statistics"`
+	Analyze bool   `json:"analyze,omitempty" jsonschema:"Execute the query for actual runtime statistics (true or false)"`
 }
 
 type ExecuteDDLIn struct {
