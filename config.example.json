@@ -4,7 +4,7 @@
         "description": "Netflix viewership data and catalog.",
         "read": {
             "dsn": "postgres://postgres:mysecretpassword@postgres:5432/postgres?sslmode=disable&TimeZone=Asia/Shanghai",
-            "enforce_readonly": false
+            "bypass_readonly_check": true
         },
         "admin": {
             "dsn": "postgres://postgres:mysecretpassword@postgres:5432/postgres?sslmode=disable&TimeZone=Asia/Shanghai"
@@ -16,7 +16,7 @@
         "description": "Sales data.",
         "read": {
             "dsn": "sqlserver://sa:yourStrong(password@mssql:1433/?database=AdventureWorksLT2022",
-            "enforce_readonly": false
+            "bypass_readonly_check": true
         },
         "admin": {
             "dsn": "sqlserver://sa:yourStrong(password@mssql:1433/?database=AdventureWorksLT2022"

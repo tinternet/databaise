@@ -48,11 +48,11 @@ func (Connector) ConnectRead(c ReadConfig) (*gorm.DB, error) {
 
 	if !c.BypassReadonlyCheck {
 		if !sqlcommon.VerifyReadonly(db, sqlcommon.SQLServerVerifyReadonlySQL) {
-			return nil, fmt.Errorf("read DSN user has write permissions (set enforce_readonly: false to bypass)")
+			return nil, fmt.Errorf("read DSN user has write permissions (set bypass_readonly_check:true to bypass)")
 		}
 		log.Printf("Verified read connection is readonly")
 	} else {
-		log.Printf("Skipping readonly verification (enforce_readonly: false)")
+		log.Printf("Skipping readonly verification (bypass_readonly_check:true)")
 	}
 
 	return db, nil

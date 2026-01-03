@@ -54,13 +54,13 @@ func (Connector) ConnectRead(cfg ReadConfig) (*gorm.DB, error) {
 		for _, g := range grants {
 			for _, p := range []string{"INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER"} {
 				if strings.Contains(g, p) {
-					return nil, fmt.Errorf("read DSN user has write permissions (set enforce_readonly: false to bypass)")
+					return nil, fmt.Errorf("read DSN user has write permissions (set bypass_readonly_check: true to bypass)")
 				}
 			}
 		}
 		log.Printf("Verified read connection is readonly")
 	} else {
-		log.Printf("Skipping readonly verification (enforce_readonly: false)")
+		log.Printf("Skipping readonly verification (bypass_readonly_check: true)")
 	}
 
 	return db, nil
