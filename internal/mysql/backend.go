@@ -150,35 +150,8 @@ func (b *Backend) ExecuteDDL(ctx context.Context, in backend.ExecuteDDLIn) (*bac
 	return &backend.DDLResult{Success: true, Message: "DDL executed successfully"}, nil
 }
 
-//go:embed missing_indexes.sql
-var missingIndexesQuery string
-
 func (b *Backend) ListMissingIndexes(ctx context.Context) ([]backend.MissingIndex, error) {
-	var indexes []struct {
-		TableSchema      string  `gorm:"column:table_schema"`
-		TableName        string  `gorm:"column:table_name"`
-		FullTableScans   int64   `gorm:"column:full_table_scans"`
-		RowsRead         int64   `gorm:"column:rows_read"`
-		RowsChanged      int64   `gorm:"column:rows_changed"`
-		TableSizeMB      float64 `gorm:"column:table_size_mb"`
-		EstimatedImpact  float64 `gorm:"column:estimated_impact"`
-		CreateSuggestion string  `gorm:"column:create_suggestion"`
-	}
-	if err := b.db.WithContext(ctx).Raw(missingIndexesQuery).Scan(&indexes).Error; err != nil {
-		return nil, err
-	}
-
-	result := make([]backend.MissingIndex, len(indexes))
-	for i, idx := range indexes {
-		result[i] = backend.MissingIndex{
-			Schema:          idx.TableSchema,
-			TableName:       idx.TableName,
-			Reason:          fmt.Sprintf("full_scans=%d, rows_read=%d, rows_changed=%d, size=%.2fMB", idx.FullTableScans, idx.RowsRead, idx.RowsChanged, idx.TableSizeMB),
-			EstimatedImpact: idx.EstimatedImpact,
-			Suggestion:      idx.CreateSuggestion,
-		}
-	}
-	return result, nil
+	return nil, fmt.Errorf("MySQL does not provide automatic index recommendations. Use list_slowest_queries to identify queries that may benefit from indexing - look for queries with high no_index_used or full_scan counts")
 }
 
 //go:embed list_waiting_queries.sql
@@ -224,32 +197,37 @@ func (b *Backend) ListWaitingQueries(ctx context.Context) ([]backend.WaitingQuer
 //go:embed list_slowest_queries.sql
 var slowestQueriesQuery string
 
-func (b *Backend) ListSlowestQueries(ctx context.Context) ([]backend.SlowQuery, error) {
-	var queries []struct {
-		DigestText   string  `gorm:"column:digest_text"`
-		SchemaName   string  `gorm:"column:schema_name"`
-		CountStar    int64   `gorm:"column:count_star"`
-		TotalTimeSec float64 `gorm:"column:total_time_sec"`
-		AvgTimeSec   float64 `gorm:"column:avg_time_sec"`
-		MinTimeSec   float64 `gorm:"column:min_time_sec"`
-		MaxTimeSec   float64 `gorm:"column:max_time_sec"`
-	}
+func (b *Backend) ListSlowestQueries(ctx context.Context) (*backend.SlowQueryResult, error) {
+	var queries []map[string]any
 	if err := b.db.WithContext(ctx).Raw(slowestQueriesQuery).Scan(&queries).Error; err != nil {
 		return nil, err
 	}
 
-	result := make([]backend.SlowQuery, len(queries))
-	for i, q := range queries {
-		result[i] = backend.SlowQuery{
-			QueryHash:    q.DigestText[:min(50, len(q.DigestText))],
-			Calls:        q.CountStar,
-			TotalTimeSec: q.TotalTimeSec,
-			AvgTimeSec:   q.AvgTimeSec,
-			MaxTimeSec:   q.MaxTimeSec,
-			Query:        q.DigestText,
-		}
-	}
-	return result, nil
+	return &backend.SlowQueryResult{
+		Columns: map[string]string{
+			"query":              "The normalized SQL query text",
+			"schema_name":        "Database schema name",
+			"calls":              "Number of times this query was executed",
+			"total_time_sec":     "Total execution time in seconds",
+			"avg_time_sec":       "Average execution time in seconds",
+			"max_time_sec":       "Maximum execution time in seconds",
+			"lock_time_sec":      "Total time spent waiting for locks in seconds",
+			"rows_examined":      "Total rows examined across all executions",
+			"rows_sent":          "Total rows returned to client",
+			"rows_affected":      "Total rows affected (INSERT/UPDATE/DELETE)",
+			"no_index_used":      "Number of executions where no index was used",
+			"no_good_index_used": "Number of executions where no good index was found",
+			"full_join":          "Number of full joins (joins without indexes)",
+			"full_scan":          "Number of full table scans",
+			"tmp_tables":         "Number of temporary tables created",
+			"tmp_disk_tables":    "Number of temporary tables created on disk (memory exceeded)",
+			"errors":             "Number of errors",
+			"warnings":           "Number of warnings",
+			"first_seen":         "When this query was first seen",
+			"last_seen":          "When this query was last seen",
+		},
+		Queries: queries,
+	}, nil
 }
 
 func (b *Backend) ListDeadlocks(ctx context.Context) ([]backend.Deadlock, error) {

@@ -257,29 +257,34 @@ func (b *Backend) ListWaitingQueries(ctx context.Context) ([]backend.WaitingQuer
 //go:embed list_slowest_queries.sql
 var slowestQueriesQuery string
 
-func (b *Backend) ListSlowestQueries(ctx context.Context) ([]backend.SlowQuery, error) {
-	var queries []struct {
-		StatementText    string `gorm:"column:statement_text"`
-		CreationTime     string `gorm:"column:creation_time"`
-		LastExecTime     string `gorm:"column:last_execution_time"`
-		ExecutionCount   int    `gorm:"column:execution_count"`
-		TotalElapsedTime int    `gorm:"column:total_elapsed_time"`
-		AvgElapsedTime   int    `gorm:"column:avg_elapsed_time"`
-	}
+func (b *Backend) ListSlowestQueries(ctx context.Context) (*backend.SlowQueryResult, error) {
+	var queries []map[string]any
 	if err := b.db.WithContext(ctx).Raw(slowestQueriesQuery).Scan(&queries).Error; err != nil {
 		return nil, err
 	}
 
-	result := make([]backend.SlowQuery, len(queries))
-	for i, q := range queries {
-		result[i] = backend.SlowQuery{
-			Calls:        int64(q.ExecutionCount),
-			TotalTimeSec: float64(q.TotalElapsedTime) / 1000000.0, // microseconds to seconds
-			AvgTimeSec:   float64(q.AvgElapsedTime) / 1000000.0,
-			Query:        q.StatementText,
-		}
-	}
-	return result, nil
+	return &backend.SlowQueryResult{
+		Columns: map[string]string{
+			"query":                 "The SQL query text",
+			"calls":                 "Number of times this query was executed",
+			"total_time_sec":        "Total elapsed time in seconds",
+			"avg_time_sec":          "Average elapsed time in seconds",
+			"min_time_sec":          "Minimum elapsed time in seconds",
+			"max_time_sec":          "Maximum elapsed time in seconds",
+			"total_cpu_time_sec":    "Total CPU time in seconds",
+			"avg_cpu_time_sec":      "Average CPU time in seconds",
+			"total_logical_reads":   "Total logical reads (pages read from cache)",
+			"total_logical_writes":  "Total logical writes",
+			"total_physical_reads":  "Total physical reads (pages read from disk)",
+			"avg_logical_reads":     "Average logical reads per execution",
+			"total_rows_returned":   "Total rows returned across all executions",
+			"avg_rows_returned":     "Average rows returned per execution",
+			"total_memory_grant_kb": "Total memory granted in KB",
+			"creation_time":         "When the query plan was created",
+			"last_execution_time":   "When the query was last executed",
+		},
+		Queries: queries,
+	}, nil
 }
 
 //go:embed list_deadlocks.sql

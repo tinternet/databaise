@@ -189,35 +189,8 @@ func (b *Backend) ExecuteDDL(ctx context.Context, in backend.ExecuteDDLIn) (*bac
 	return &backend.DDLResult{Success: true, Message: "DDL executed successfully"}, nil
 }
 
-//go:embed missing_indexes.sql
-var missingIndexesQuery string
-
 func (b *Backend) ListMissingIndexes(ctx context.Context) ([]backend.MissingIndex, error) {
-	var indexes []struct {
-		Schema           string  `gorm:"column:schema"`
-		TableName        string  `gorm:"column:table_name"`
-		SeqScans         int64   `gorm:"column:seq_scans"`
-		SeqTuplesRead    int64   `gorm:"column:seq_tuples_read"`
-		IndexScans       int64   `gorm:"column:index_scans"`
-		TableSizeMB      float64 `gorm:"column:table_size_mb"`
-		EstimatedImpact  float64 `gorm:"column:estimated_impact"`
-		CreateSuggestion string  `gorm:"column:create_suggestion"`
-	}
-	if err := b.db.WithContext(ctx).Raw(missingIndexesQuery).Scan(&indexes).Error; err != nil {
-		return nil, err
-	}
-
-	result := make([]backend.MissingIndex, len(indexes))
-	for i, idx := range indexes {
-		result[i] = backend.MissingIndex{
-			Schema:          idx.Schema,
-			TableName:       idx.TableName,
-			Reason:          fmt.Sprintf("seq_scans=%d, seq_tuples_read=%d, index_scans=%d, size=%.2fMB", idx.SeqScans, idx.SeqTuplesRead, idx.IndexScans, idx.TableSizeMB),
-			EstimatedImpact: idx.EstimatedImpact,
-			Suggestion:      idx.CreateSuggestion,
-		}
-	}
-	return result, nil
+	return nil, fmt.Errorf("PostgreSQL does not provide automatic index recommendations. Use list_slowest_queries to identify queries that may benefit from indexing - look for queries with low cache_hit_pct or high temp_blks_read")
 }
 
 //go:embed list_waiting_queries.sql
@@ -264,35 +237,34 @@ func (b *Backend) ListWaitingQueries(ctx context.Context) ([]backend.WaitingQuer
 //go:embed list_slowest_queries.sql
 var slowestQueriesQuery string
 
-func (b *Backend) ListSlowestQueries(ctx context.Context) ([]backend.SlowQuery, error) {
-	var queries []struct {
-		QueryHash         string  `gorm:"column:query_hash"`
-		Calls             int64   `gorm:"column:calls"`
-		TotalTimeSec      float64 `gorm:"column:total_time_sec"`
-		AvgTimeSec        float64 `gorm:"column:avg_time_sec"`
-		MinTimeSec        float64 `gorm:"column:min_time_sec"`
-		MaxTimeSec        float64 `gorm:"column:max_time_sec"`
-		SharedBlocksHit   int64   `gorm:"column:shared_blocks_hit"`
-		SharedBlocksRead  int64   `gorm:"column:shared_blocks_read"`
-		SharedBlocksWrite int64   `gorm:"column:shared_blocks_written"`
-		QueryText         string  `gorm:"column:query_text"`
-	}
+func (b *Backend) ListSlowestQueries(ctx context.Context) (*backend.SlowQueryResult, error) {
+	var queries []map[string]any
 	if err := b.db.WithContext(ctx).Raw(slowestQueriesQuery).Scan(&queries).Error; err != nil {
 		return nil, err
 	}
 
-	result := make([]backend.SlowQuery, len(queries))
-	for i, q := range queries {
-		result[i] = backend.SlowQuery{
-			QueryHash:    q.QueryHash,
-			Calls:        q.Calls,
-			TotalTimeSec: q.TotalTimeSec,
-			AvgTimeSec:   q.AvgTimeSec,
-			MaxTimeSec:   q.MaxTimeSec,
-			Query:        q.QueryText,
-		}
-	}
-	return result, nil
+	return &backend.SlowQueryResult{
+		Columns: map[string]string{
+			"query_hash":          "Unique identifier for the normalized query",
+			"calls":               "Number of times this query was executed",
+			"total_time_sec":      "Total execution time in seconds",
+			"avg_time_sec":        "Average execution time in seconds",
+			"min_time_sec":        "Minimum execution time in seconds",
+			"max_time_sec":        "Maximum execution time in seconds",
+			"mean_time_sec":       "Mean execution time in seconds",
+			"stddev_time_sec":     "Standard deviation of execution time",
+			"total_rows_returned": "Total rows returned across all executions",
+			"shared_blks_hit":     "Shared blocks found in cache",
+			"shared_blks_read":    "Shared blocks read from disk",
+			"shared_blks_dirtied": "Shared blocks dirtied by this query",
+			"shared_blks_written": "Shared blocks written by this query",
+			"temp_blks_read":      "Temporary blocks read (indicates temp table usage)",
+			"temp_blks_written":   "Temporary blocks written",
+			"cache_hit_pct":       "Buffer cache hit percentage (higher is better)",
+			"query":               "The normalized SQL query text",
+		},
+		Queries: queries,
+	}, nil
 }
 
 //go:embed list_deadlocks.sql

@@ -146,7 +146,7 @@ func (b *Backend) ListWaitingQueries(ctx context.Context) ([]backend.WaitingQuer
 }
 
 // SQLite doesn't have query statistics
-func (b *Backend) ListSlowestQueries(ctx context.Context) ([]backend.SlowQuery, error) {
+func (b *Backend) ListSlowestQueries(ctx context.Context) (*backend.SlowQueryResult, error) {
 	return nil, fmt.Errorf("slow query statistics are not available for SQLite")
 }
 

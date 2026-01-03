@@ -55,14 +55,10 @@ type WaitingQuery struct {
 	QueryDurationSec float64 `json:"query_duration_sec,omitempty" jsonschema:"Query duration in seconds"`
 }
 
-// SlowQuery represents a slow query from statistics.
-type SlowQuery struct {
-	QueryHash    string  `json:"query_hash,omitempty" jsonschema:"Query hash for identification"`
-	Calls        int64   `json:"calls,omitempty" jsonschema:"Number of executions"`
-	TotalTimeSec float64 `json:"total_time_sec" jsonschema:"Total execution time in seconds"`
-	AvgTimeSec   float64 `json:"avg_time_sec,omitempty" jsonschema:"Average execution time"`
-	MaxTimeSec   float64 `json:"max_time_sec,omitempty" jsonschema:"Maximum execution time"`
-	Query        string  `json:"query" jsonschema:"The SQL query text"`
+// SlowQueryResult represents slow query statistics with database-specific metrics.
+type SlowQueryResult struct {
+	Columns map[string]string `json:"columns" jsonschema:"Column name to description mapping"`
+	Queries []map[string]any  `json:"queries" jsonschema:"Query statistics rows with database-specific metrics"`
 }
 
 // Deadlock represents deadlock information.
@@ -90,7 +86,7 @@ type ReadQueryIn struct {
 
 type ExplainQueryIn struct {
 	Query   string `json:"query" jsonschema:"required,The SQL query to explain"`
-	Analyze bool   `json:"analyze,omitempty" jsonschema:"Execute the query for actual runtime statistics (true or false)"`
+	Analyze bool   `json:"analyze,omitempty" jsonschema:"Execute the query for actual runtime statistics (use true or false)"`
 }
 
 type ExecuteDDLIn struct {
@@ -121,7 +117,7 @@ type SQLBackend interface {
 	ListWaitingQueries(ctx context.Context) ([]WaitingQuery, error)
 
 	// ListSlowestQueries returns the slowest queries by total time.
-	ListSlowestQueries(ctx context.Context) ([]SlowQuery, error)
+	ListSlowestQueries(ctx context.Context) (*SlowQueryResult, error)
 
 	// ListDeadlocks returns deadlock information.
 	ListDeadlocks(ctx context.Context) ([]Deadlock, error)

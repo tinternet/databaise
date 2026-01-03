@@ -154,7 +154,7 @@ func TestListMissingIndexes(t *testing.T) {
 	t.Parallel()
 	b := openTestConnection(t)
 	_, err := b.ListMissingIndexes(t.Context())
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "does not provide automatic index recommendations")
 }
 
 func TestListWaitingQueries(t *testing.T) {
@@ -170,6 +170,14 @@ func TestListSlowestQueries(t *testing.T) {
 	res, err := b.ListSlowestQueries(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, res)
+	require.NotNil(t, res.Columns)
+	require.NotNil(t, res.Queries)
+	// Verify expected columns are documented
+	require.Contains(t, res.Columns, "query")
+	require.Contains(t, res.Columns, "calls")
+	require.Contains(t, res.Columns, "total_time_sec")
+	require.Contains(t, res.Columns, "no_index_used")
+	require.Contains(t, res.Columns, "full_scan")
 }
 
 func TestListDeadlocks(t *testing.T) {

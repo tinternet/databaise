@@ -47,10 +47,6 @@ type WaitingQueriesOut struct {
 	Queries []WaitingQuery `json:"queries" jsonschema:"List of waiting queries"`
 }
 
-type SlowestQueriesOut struct {
-	Queries []SlowQuery `json:"queries" jsonschema:"List of slowest queries"`
-}
-
 type DeadlocksOut struct {
 	Deadlocks []Deadlock `json:"deadlocks" jsonschema:"List of deadlock information"`
 }
@@ -146,7 +142,7 @@ func init() {
 		})
 	}, server.Tool{
 		Name:        "list_missing_indexes",
-		Description: "Analyzes query patterns and table statistics to identify tables that would benefit from additional indexes. Returns recommendations with estimated impact scores and suggested CREATE INDEX statements. For SQL Server, uses the missing index DMVs. For PostgreSQL, analyzes sequential scan statistics. For MySQL, checks performance_schema for full table scans. Not available for SQLite.",
+		Description: "Returns index recommendations with estimated impact scores and suggested CREATE INDEX statements. Only available for SQL Server (uses the missing index DMVs). For MySQL and PostgreSQL, use list_slowest_queries instead to identify queries that may benefit from indexing.",
 	})
 
 	server.AddTool(func(ctx context.Context, in DatabaseReq) (*WaitingQueriesOut, error) {
@@ -162,17 +158,13 @@ func init() {
 		Description: "Shows queries that are currently blocked or waiting for resources. Useful for diagnosing lock contention and identifying blocking chains. Returns the waiting query, what it's waiting for (lock type, resource), and which process is blocking it. Not available for SQLite.",
 	})
 
-	server.AddTool(func(ctx context.Context, in DatabaseReq) (*SlowestQueriesOut, error) {
-		return Handle(ctx, in.DatabaseName, struct{}{}, GetAdminBackend, func(b SQLBackend, ctx context.Context, _ struct{}) (*SlowestQueriesOut, error) {
-			queries, err := b.ListSlowestQueries(ctx)
-			if err != nil {
-				return nil, err
-			}
-			return &SlowestQueriesOut{Queries: queries}, nil
+	server.AddTool(func(ctx context.Context, in DatabaseReq) (*SlowQueryResult, error) {
+		return Handle(ctx, in.DatabaseName, struct{}{}, GetAdminBackend, func(b SQLBackend, ctx context.Context, _ struct{}) (*SlowQueryResult, error) {
+			return b.ListSlowestQueries(ctx)
 		})
 	}, server.Tool{
 		Name:        "list_slowest_queries",
-		Description: "Returns the slowest queries by total execution time from query statistics. Shows execution count, total/average/max time, and the query text. Useful for identifying queries that need optimization. For PostgreSQL, requires the pg_stat_statements extension. Not available for SQLite.",
+		Description: "Returns the slowest queries by total execution time from query statistics. Shows database-specific metrics including execution count, timing stats, I/O stats, and the query text. The 'columns' field describes each metric. Useful for identifying queries that need optimization. For PostgreSQL, requires the pg_stat_statements extension. Not available for SQLite.",
 	})
 
 	server.AddTool(func(ctx context.Context, in DatabaseReq) (*DeadlocksOut, error) {
