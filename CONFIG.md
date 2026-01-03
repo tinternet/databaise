@@ -10,7 +10,6 @@ Each database entry has the following structure:
         "type": "postgres",
         "description": "What data is in this database",
         "read": { ... },
-        "write": { ... },
         "admin": { ... }
     }
 }
@@ -47,9 +46,12 @@ The description helps the LLM understand what data is available in this database
 
 ### Operation Levels
 
-Only include the sections you want to enable (`read`, `write`, `admin`). Each operation level uses its own DSN/credentials for security isolation.
+Each operation level uses its own DSN/credentials for security isolation. The `admin` is optional, and omitting it will disable the tools for the database.
 
-For the complete list of available tools by operation level, see the [Available Tools](README.md#available-tools) section in README.md.
+| Config Key | Tools Enabled |
+|------------|---------------|
+| `read` | `list_tables`, `describe_table`, `execute_query` |
+| `admin` | `explain_query`, `execute_ddl`, `list_missing_indexes`, `list_waiting_queries`, `list_slowest_queries`, `list_deadlocks` |
 
 ---
 
@@ -64,11 +66,8 @@ For the complete list of available tools by operation level, see the [Available 
         "description": "Netflix viewership data and catalog.",
         "read": {
             "dsn": "postgres://reader:pass@localhost:5432/netflix",
-            "enforce_readonly": true,
+            "bypass_readonly_check": true,
             "use_readonly_tx": false
-        },
-        "write": {
-            "dsn": "postgres://writer:pass@localhost:5432/netflix"
         },
         "admin": {
             "dsn": "postgres://admin:pass@localhost:5432/netflix"
@@ -82,10 +81,10 @@ For the complete list of available tools by operation level, see the [Available 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `dsn` | string | required | PostgreSQL connection string |
-| `enforce_readonly` | bool | `true` | **Startup Check**: Verifies the database user cannot write. |
-| `use_readonly_tx` | bool | `false` | **Runtime Check**: Enforces read-only mode on every query. |
+| `bypass_readonly_check` | bool | `false` | **Startup Check**: Controls the readonly check at startup. |
+| `use_readonly_tx` | bool | `false` | **Runtime Check**: Enforces read-only mode on every query (PostgreSQL). |
 
-**Startup Check:** By default, the server connects at startup and verifies that the database user lacks write permissions. If the user does have write permissions (but you still want to proceed), set `enforce_readonly: false`.
+**Startup Check:** By default, the server connects at startup and verifies that the database user lacks write permissions. If the user does have write permissions (but you still want to proceed), set `bypass_readonly_check: true`.
 
 **Runtime Check** When `use_readonly_tx: true`, the server skips the startup check and instead enforces safety by wrapping every query in a `READ ONLY` transaction. This uses prepared statements to strictly confine the LLM in two ways:
 
@@ -100,14 +99,11 @@ For the complete list of available tools by operation level, see the [Available 
         "type": "mysql",
         "description": "Analytics data warehouse.",
         "read": {
-            "dsn": "mysql://reader:pass@localhost:3306/analytics",
-            "enforce_readonly": true,
-        },
-        "write": {
-            "dsn": "mysql://writer:pass@localhost:3306/analytics"
+            "dsn": "reader:pass@tcp(localhost:3306)/analytics",
+            "bypass_readonly_check": true
         },
         "admin": {
-            "dsn": "mysql://admin:pass@localhost:3306/analytics"
+            "dsn": "admin:pass@tcp(localhost:3306)/analytics"
         }
     }
 }
@@ -117,8 +113,8 @@ For the complete list of available tools by operation level, see the [Available 
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `dsn` | string | required | MySQL connection string |
-| `enforce_readonly` | bool | `true` | **Startup Check**: Verifies the database user cannot write. |
+| `dsn` | string | required | MySQL connection string (Go MySQL driver format) |
+| `bypass_readonly_check` | bool | `false` | **Startup Check**: Whether to skip the readonly user check. |
 
 
 ### SQLite
@@ -129,13 +125,12 @@ For the complete list of available tools by operation level, see the [Available 
         "type": "sqlite",
         "description": "Local cache database.",
         "read": { "path": "/data/cache.db" },
-        "write": { "path": "/data/cache.db" },
         "admin": { "path": "/data/cache.db" }
     }
 }
 ```
 
-SQLite automatically appends the `?mode=ro` for `read` connections.
+SQLite automatically appends `?mode=ro` for `read` connections and `?mode=rw` for `admin` connections.
 
 **Options:**
 
@@ -152,10 +147,7 @@ SQLite automatically appends the `?mode=ro` for `read` connections.
         "description": "Order management system.",
         "read": {
             "dsn": "sqlserver://reader:pass@localhost:1433?database=orders",
-            "enforce_readonly": true
-        },
-        "write": {
-            "dsn": "sqlserver://writer:pass@localhost:1433?database=orders"
+            "bypass_readonly_check": true
         },
         "admin": {
             "dsn": "sqlserver://admin:pass@localhost:1433?database=orders"
@@ -169,7 +161,7 @@ SQLite automatically appends the `?mode=ro` for `read` connections.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `dsn` | string | required | SQL Server connection string |
-| `enforce_readonly` | bool | `true` | Verify read user has no write permissions at startup |
+| `bypass_readonly_check` | bool | `false` | Whether to skip the readonly use check. |
 
 The readonly user should have `db_datareader` role only.
 
@@ -190,16 +182,13 @@ The readonly user should have `db_datareader` role only.
         }
     },
     "analytics": {
-        "type": "postgres",
+        "type": "mysql",
         "description": "Analytics events and aggregations",
         "read": {
-            "dsn": "postgres://readonly:pass@analytics-db.example.com/analytics?sslmode=require"
-        },
-        "write": {
-            "dsn": "postgres://app:pass@analytics-db.example.com/analytics?sslmode=require"
+            "dsn": "readonly:pass@tcp(analytics-db.example.com)/analytics"
         },
         "admin": {
-            "dsn": "postgres://admin:pass@analytics-db.example.com/analytics?sslmode=require"
+            "dsn": "admin:pass@tcp(analytics-db.example.com)/analytics"
         }
     },
     "local_cache": {

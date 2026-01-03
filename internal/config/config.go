@@ -10,28 +10,20 @@ import (
 type Server map[string]Database
 
 // Database is the top-level config for each database connection.
-// The presence of read/write/admin keys determines which tools are registered.
 type Database struct {
-	// Backend is the database type: "postgres", "sqlite", "sqlserver", "mongodb"
+	// Backend is the database type: "postgres", "sqlite", "sqlserver", "mysql"
 	Backend string `json:"type"`
 	// Description is a human-readable description for LLM context
 	Description string `json:"description,omitempty"`
-	// Read config - presence enables *_list_tables, *_describe_table, *_execute_query tools
+	// Read config - required for all read operations
 	Read json.RawMessage `json:"read,omitempty"`
-	// Write config - presence enables *_write_query tool
-	Write json.RawMessage `json:"write,omitempty"`
-	// Admin config - presence enables *_create_index and other admin tools
+	// Admin config - enables admin tools (explain, DDL, missing indexes, etc.)
 	Admin json.RawMessage `json:"admin,omitempty"`
 }
 
 // HasRead returns true if read operations are configured.
 func (d Database) HasRead() bool {
 	return len(d.Read) > 0
-}
-
-// HasWrite returns true if write operations are configured.
-func (d Database) HasWrite() bool {
-	return len(d.Write) > 0
 }
 
 // HasAdmin returns true if admin operations are configured.
@@ -45,14 +37,6 @@ func (d Database) ParseReadConfig(v any) error {
 		return fmt.Errorf("read config not provided")
 	}
 	return json.Unmarshal(d.Read, v)
-}
-
-// ParseWriteConfig unmarshals the write config into the provided struct.
-func (d Database) ParseWriteConfig(v any) error {
-	if len(d.Write) == 0 {
-		return fmt.Errorf("write config not provided")
-	}
-	return json.Unmarshal(d.Write, v)
 }
 
 // ParseAdminConfig unmarshals the admin config into the provided struct.

@@ -11,6 +11,7 @@ import (
 	"github.com/tinternet/databaise/internal/logging"
 	"github.com/tinternet/databaise/internal/server"
 
+	_ "github.com/tinternet/databaise/internal/mysql"
 	_ "github.com/tinternet/databaise/internal/postgres"
 	_ "github.com/tinternet/databaise/internal/sqlite"
 	_ "github.com/tinternet/databaise/internal/sqlserver"

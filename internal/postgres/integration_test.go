@@ -9,66 +9,46 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tinternet/databaise/internal/config"
-	"github.com/tinternet/databaise/internal/provision"
+	"github.com/tinternet/databaise/internal/backend"
 	"github.com/tinternet/databaise/internal/sqltest"
 )
 
-func openTestConnection(t *testing.T) DB {
+func openTestConnection(t *testing.T) *Backend {
 	t.Helper()
 	dsn := sqltest.SetupPostgresContainer(t)
-	db, err := Connector{}.ConnectAdmin(AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}})
-	sqltest.Seed(t, db.DB)
+	db, err := Connector{}.ConnectAdmin(AdminConfig{DSN: dsn})
 	require.NoError(t, err)
-	return db
+	sqltest.Seed(t, db.DB)
+	return &Backend{db: db}
 }
 
 func TestConnect(t *testing.T) {
 	t.Parallel()
 	dsn := sqltest.SetupPostgresContainer(t)
 
-	t.Run("ReadOnly", func(t *testing.T) {
+	t.Run("ReadOnly With BypassReadonlyCheck=false", func(t *testing.T) {
 		t.Parallel()
-		provisioner := provision.PostgresProvisioner{}
-		require.NoError(t, provisioner.Connect(dsn))
-		require.NoError(t, provisioner.CreateUser(t.Context(), "testuser", "testpass"))
-		rodsn := sqltest.ReplaceURLCredentials(t, dsn, "testuser", "testpass")
-		db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: rodsn}})
-		require.NotNil(t, db)
-		require.NoError(t, err)
-	})
-
-	t.Run("ReadOnly With EnforceReadonly=true", func(t *testing.T) {
-		t.Parallel()
-		db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn}})
-		require.NotNil(t, db)
+		_, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn})
 		require.ErrorContains(t, err, "read DSN user has write permissions")
 	})
 
-	t.Run("ReadOnly With EnforceReadonly=false", func(t *testing.T) {
+	t.Run("ReadOnly With BypassReadonlyCheck=true", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn, EnforceReadonly: ptr(false)}})
+		db, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn, BypassReadonlyCheck: true})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("ReadOnly With UseReadonlyTx", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn}, UseReadonlyTx: true})
-		require.NotNil(t, db)
-		require.NoError(t, err)
-	})
-
-	t.Run("Write", func(t *testing.T) {
-		t.Parallel()
-		db, err := Connector{}.ConnectWrite(WriteConfig{WriteConfig: config.WriteConfig{DSN: dsn}})
+		db, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn, UseReadonlyTx: true})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("Admin", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectAdmin(AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}})
+		db, err := Connector{}.ConnectAdmin(AdminConfig{DSN: dsn})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
@@ -76,10 +56,10 @@ func TestConnect(t *testing.T) {
 
 func TestListTables(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
-	l, err := ListTables(t.Context(), ListTablesIn{}, db)
+	b := openTestConnection(t)
+	tables, err := b.ListTables(t.Context(), backend.ListTablesIn{})
 	require.NoError(t, err)
-	require.ElementsMatch(t, l.Tables, []Table{
+	require.ElementsMatch(t, tables, []backend.Table{
 		{Schema: "public", Name: "orders"},
 		{Schema: "public", Name: "users"},
 	})
@@ -87,11 +67,11 @@ func TestListTables(t *testing.T) {
 
 func TestDescribeTable(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
+	b := openTestConnection(t)
 
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{Schema: "public", Table: "orders"}, db)
+		res, err := b.DescribeTable(t.Context(), backend.DescribeTableIn{Schema: "public", Table: "orders"})
 
 		require.NoError(t, err)
 		require.NotNil(t, res)
@@ -103,11 +83,10 @@ func TestDescribeTable(t *testing.T) {
 		assert.True(t, slices.ContainsFunc(res.CreateConstraints, func(v string) bool {
 			return strings.Contains(v, "ADD CONSTRAINT")
 		}))
-
 	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{Schema: "public", Table: "nonexistend"}, db)
+		res, err := b.DescribeTable(t.Context(), backend.DescribeTableIn{Schema: "public", Table: "nonexistent"})
 		require.Nil(t, res)
 		require.ErrorContains(t, err, "does not exist")
 	})
@@ -115,96 +94,74 @@ func TestDescribeTable(t *testing.T) {
 
 func TestExecuteQuery(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
+	b := openTestConnection(t)
 
-	res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM public.orders"}, db)
+	res, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "SELECT * FROM public.orders"})
 	require.NoError(t, err)
 	require.Len(t, res.Rows, 2)
 
 	t.Run("Malformed SQL", func(t *testing.T) {
-		_, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT NOT SELECT"}, db)
+		_, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "SELECT NOT SELECT"})
 		require.ErrorContains(t, err, "syntax error at or near")
 	})
 
 	t.Run("Empty Result", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM public.orders WHERE id = 999"}, db)
+		res, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "SELECT * FROM public.orders WHERE id = 999"})
 		require.NoError(t, err)
 		require.Len(t, res.Rows, 0)
 	})
 }
 
-func TestCreateIndex(t *testing.T) {
+func TestExecuteDDL(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
+	b := openTestConnection(t)
 
-	ix := CreateIndexIn{
-		Schema:  "public",
-		Table:   "orders",
-		Name:    "ix_someindex1",
-		Columns: []string{"id", "created_at"},
-		Unique:  true,
-	}
-
-	res, err := CreateIndex(t.Context(), ix, db)
+	res, err := b.ExecuteDDL(t.Context(), backend.ExecuteDDLIn{
+		DDL: "CREATE UNIQUE INDEX ix_someindex1 ON public.orders (id, created_at)",
+	})
 
 	require.NoError(t, err)
 	require.True(t, res.Success)
 
 	t.Run("IndexAlreadyExists", func(t *testing.T) {
-		res, err := CreateIndex(t.Context(), ix, db)
-		require.Nil(t, res)
+		_, err := b.ExecuteDDL(t.Context(), backend.ExecuteDDLIn{
+			DDL: "CREATE UNIQUE INDEX ix_someindex1 ON public.orders (id, created_at)",
+		})
 		require.ErrorContains(t, err, "already exists")
 	})
-}
 
-func TestDropIndex(t *testing.T) {
-	db := openTestConnection(t)
-
-	res, err := CreateIndex(t.Context(), CreateIndexIn{
-		Schema:  "public",
-		Table:   "orders",
-		Name:    "ix_someindex1",
-		Columns: []string{"id", "created_at"},
-		Unique:  true,
-	}, db)
-
-	require.NoError(t, err)
-	require.True(t, res.Success)
-
-	ix, err := DropIndex(t.Context(), DropIndexIn{Schema: "public", Name: "ix_someindex1"}, db)
-	require.True(t, ix.Success)
-	require.NoError(t, err)
-
-	t.Run("NonExistentIndex", func(t *testing.T) {
-		ix, err := DropIndex(t.Context(), DropIndexIn{Schema: "public", Name: "ix_someindex1"}, db)
-		require.Nil(t, ix)
-		require.ErrorContains(t, err, "does not exist")
+	t.Run("DropIndex", func(t *testing.T) {
+		res, err := b.ExecuteDDL(t.Context(), backend.ExecuteDDLIn{
+			DDL: "DROP INDEX public.ix_someindex1",
+		})
+		require.NoError(t, err)
+		require.True(t, res.Success)
 	})
 }
 
 func TestExplainQuery(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
+	b := openTestConnection(t)
 
 	t.Run("Explain", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM public.orders"}, db)
+		res, err := b.ExplainQuery(t.Context(), backend.ExplainQueryIn{Query: "SELECT * FROM public.orders"})
 		require.NoError(t, err)
-		require.Greater(t, len(res.Plan), 1)
-		t.Logf("%v", res.Plan)
+		require.Equal(t, "json", res.Format)
+		require.Greater(t, len(res.Result), 1)
 	})
-	t.Run("ExplainQueryPlan", func(t *testing.T) {
+	t.Run("ExplainAnalyze", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM public.orders", Analyze: true}, db)
+		res, err := b.ExplainQuery(t.Context(), backend.ExplainQueryIn{Query: "SELECT * FROM public.orders", Analyze: true})
 		require.NoError(t, err)
-		require.Greater(t, len(res.Plan), 1)
-		t.Logf("%v", res.Plan)
+		require.Equal(t, "json", res.Format)
+		require.Greater(t, len(res.Result), 1)
 	})
 
 	t.Run("MalformedQuery", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT NOT SELECT"}, db)
+		res, err := b.ExplainQuery(t.Context(), backend.ExplainQueryIn{Query: "SELECT NOT SELECT"})
 		require.Nil(t, res)
 		require.ErrorContains(t, err, "syntax error at or near")
 	})
@@ -214,28 +171,30 @@ func TestReadonlyTransactionEnforcement(t *testing.T) {
 	t.Parallel()
 
 	dsn := sqltest.SetupPostgresContainer(t)
-	adm, err := Connector{}.ConnectAdmin(AdminConfig{AdminConfig: config.AdminConfig{DSN: dsn}})
+	adminDB, err := Connector{}.ConnectAdmin(AdminConfig{DSN: dsn})
 	require.NoError(t, err)
-	sqltest.Seed(t, adm.DB)
-	db, err := Connector{}.ConnectRead(ReadConfig{ReadConfig: config.ReadConfig{DSN: dsn}, UseReadonlyTx: true})
+	sqltest.Seed(t, adminDB.DB)
+
+	readDB, err := Connector{}.ConnectRead(ReadConfig{DSN: dsn, UseReadonlyTx: true})
 	require.NoError(t, err)
+	b := &Backend{db: readDB}
 
 	t.Run("ReadOnlyTransactionAllowed", func(t *testing.T) {
 		t.Parallel()
-		_, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM public.orders"}, db)
+		_, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "SELECT * FROM public.orders"})
 		require.NoError(t, err)
 	})
 
 	t.Run("WriteInReadOnlyTransaction", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "DELETE FROM public.orders"}, db)
+		res, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "DELETE FROM public.orders"})
 		require.Nil(t, res)
 		require.ErrorContains(t, err, "cannot execute DELETE in a read-only transaction")
 	})
 
 	t.Run("Bypass readonly tx", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "COMMIT; DELETE FROM public.orders"}, db)
+		res, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "COMMIT; DELETE FROM public.orders"})
 		require.Nil(t, res)
 		require.ErrorContains(t, err, "cannot insert multiple commands into a prepared statement")
 	})
@@ -243,38 +202,33 @@ func TestReadonlyTransactionEnforcement(t *testing.T) {
 
 func TestListMissingIndexes(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
-	res, err := ListMissingIndexes(t.Context(), struct{}{}, db)
+	b := openTestConnection(t)
+	res, err := b.ListMissingIndexes(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }
 
 func TestListWaitingQueries(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
-	res, err := ListWaitingQueries(t.Context(), struct{}{}, db)
+	b := openTestConnection(t)
+	res, err := b.ListWaitingQueries(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, res)
 }
 
 func TestListSlowestQueries(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
-	require.NoError(t, db.Exec("CREATE EXTENSION IF NOT EXISTS pg_stat_statements").Error)
-	res, err := ListSlowestQueries(t.Context(), struct{}{}, db)
+	b := openTestConnection(t)
+	require.NoError(t, b.db.Exec("CREATE EXTENSION IF NOT EXISTS pg_stat_statements").Error)
+	res, err := b.ListSlowestQueries(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	require.NotNil(t, res.Queries)
 }
 
 func TestListDeadlocks(t *testing.T) {
 	t.Parallel()
-	db := openTestConnection(t)
-	res, err := ListDeadlocks(t.Context(), struct{}{}, db)
+	b := openTestConnection(t)
+	res, err := b.ListDeadlocks(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, res)
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }

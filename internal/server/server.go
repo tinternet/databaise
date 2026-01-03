@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tinternet/databaise/internal/logging"
 )
@@ -29,49 +28,11 @@ func AddTool[In, Out any](handler Handler[In, Out], tool Tool) {
 		Name:        tool.Name,
 		Description: tool.Description,
 	}
-	applyInputSchema[In](t, false)
 
 	mcp.AddTool(server, t, func(ctx context.Context, request *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
 		res, err := handler(ctx, input)
 		return nil, res, err
 	})
-}
-
-// AddToolWithDatabaseName registers a tool that includes database_name in the schema.
-// PayloadIn is the type used for schema generation (the inner payload type).
-// In is the actual handler input type (typically Request[PayloadIn]).
-func AddToolWithDatabaseName[PayloadIn, In, Out any](handler Handler[In, Out], tool Tool) {
-	t := &mcp.Tool{
-		Name:        tool.Name,
-		Description: tool.Description,
-	}
-	applyInputSchema[PayloadIn](t, true)
-
-	mcp.AddTool(server, t, func(ctx context.Context, request *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
-		res, err := handler(ctx, input)
-		return nil, res, err
-	})
-}
-
-func applyInputSchema[T any](t *mcp.Tool, addDatabaseName bool) {
-	schema, err := jsonschema.For[T](nil)
-	if err != nil {
-		log.Printf("WARNING: Failed to generate schema for tool %s: %v", t.Name, err)
-		return
-	}
-
-	if addDatabaseName {
-		if schema.Properties == nil {
-			schema.Properties = make(map[string]*jsonschema.Schema)
-		}
-		schema.Properties["database_name"] = &jsonschema.Schema{
-			Type:        "string",
-			Description: "The name of the database to operate on.",
-		}
-		schema.Required = append([]string{"database_name"}, schema.Required...)
-	}
-
-	t.InputSchema = schema
 }
 
 func StartHTTP(address string) {

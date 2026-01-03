@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tinternet/databaise/internal/backend"
 	"github.com/tinternet/databaise/internal/sqlcommon"
 	"github.com/tinternet/databaise/internal/sqltest"
 )
@@ -21,27 +22,29 @@ func createFile(t *testing.T) string {
 	return f.Name()
 }
 
+func openTestConnection(t *testing.T) *Backend {
+	t.Helper()
+	path := createFile(t)
+	db, err := Connector{}.ConnectAdmin(AdminConfig{Path: path})
+	require.NoError(t, err)
+	sqltest.Seed(t, db)
+	return &Backend{db: db}
+}
+
 func TestConnect(t *testing.T) {
 	t.Parallel()
 	file := createFile(t)
 
 	t.Run("ReadOnly", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectRead(SqliteConfig{Path: file})
-		require.NotNil(t, db)
-		require.NoError(t, err)
-	})
-
-	t.Run("Write", func(t *testing.T) {
-		t.Parallel()
-		db, err := Connector{}.ConnectWrite(SqliteConfig{Path: file})
+		db, err := Connector{}.ConnectRead(ReadConfig{Path: file})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
 
 	t.Run("Admin", func(t *testing.T) {
 		t.Parallel()
-		db, err := Connector{}.ConnectAdmin(SqliteConfig{Path: file})
+		db, err := Connector{}.ConnectAdmin(AdminConfig{Path: file})
 		require.NotNil(t, db)
 		require.NoError(t, err)
 	})
@@ -49,26 +52,22 @@ func TestConnect(t *testing.T) {
 
 func TestListTables(t *testing.T) {
 	t.Parallel()
-
-	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
+	b := openTestConnection(t)
+	tables, err := b.ListTables(t.Context(), backend.ListTablesIn{})
 	require.NoError(t, err)
-	sqltest.Seed(t, db)
-
-	l, err := ListTables(t.Context(), ListTablesIn{}, db)
-	require.NoError(t, err)
-	require.ElementsMatch(t, l.Tables, []string{"orders", "users"})
+	require.ElementsMatch(t, tables, []backend.Table{
+		{Name: "orders"},
+		{Name: "users"},
+	})
 }
 
 func TestDescribeTable(t *testing.T) {
 	t.Parallel()
-
-	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
-	require.NoError(t, err)
-	sqltest.Seed(t, db)
+	b := openTestConnection(t)
 
 	t.Run("Success", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "orders"}, db)
+		res, err := b.DescribeTable(t.Context(), backend.DescribeTableIn{Table: "orders"})
 
 		require.NoError(t, err)
 		require.NotNil(t, res)
@@ -84,108 +83,109 @@ func TestDescribeTable(t *testing.T) {
 	})
 	t.Run("NonExistentTable", func(t *testing.T) {
 		t.Parallel()
-		res, err := DescribeTable(t.Context(), DescribeTableIn{Table: "nonexistent"}, db)
+		res, err := b.DescribeTable(t.Context(), backend.DescribeTableIn{Table: "nonexistent"})
 		require.Nil(t, res)
-		require.ErrorIs(t, sqlcommon.ErrTableNotFound, err)
+		require.ErrorIs(t, err, sqlcommon.ErrTableNotFound)
 	})
 }
 
 func TestExecuteQuery(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
-	require.NoError(t, err)
-	sqltest.Seed(t, db)
+	b := openTestConnection(t)
 
-	res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM orders"}, db)
+	res, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "SELECT * FROM orders"})
 	require.NoError(t, err)
 	require.Len(t, res.Rows, 2)
 
 	t.Run("Malformed SQL", func(t *testing.T) {
-		_, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT NOT SELECT"}, db)
+		_, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "SELECT NOT SELECT"})
 		require.ErrorContains(t, err, "syntax error")
 	})
 
 	t.Run("Empty Result", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExecuteQuery(t.Context(), ExecuteQueryIn{Query: "SELECT * FROM orders WHERE id = 999"}, db)
+		res, err := b.ExecuteQuery(t.Context(), backend.ReadQueryIn{Query: "SELECT * FROM orders WHERE id = 999"})
 		require.NoError(t, err)
 		require.Len(t, res.Rows, 0)
 	})
 }
 
-func TestCreateIndex(t *testing.T) {
+func TestExecuteDDL(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
-	require.NoError(t, err)
-	sqltest.Seed(t, db)
+	b := openTestConnection(t)
 
-	ix := CreateIndexIn{
-		Table:   "orders",
-		Name:    "ix_someindex1",
-		Columns: []string{"id", "created_at"},
-		Unique:  true,
-	}
-
-	res, err := CreateIndex(t.Context(), ix, db)
+	res, err := b.ExecuteDDL(t.Context(), backend.ExecuteDDLIn{
+		DDL: "CREATE UNIQUE INDEX ix_someindex1 ON orders (id, created_at)",
+	})
 
 	require.NoError(t, err)
 	require.True(t, res.Success)
 
 	t.Run("IndexAlreadyExists", func(t *testing.T) {
-		res, err := CreateIndex(t.Context(), ix, db)
-		require.Nil(t, res)
+		_, err := b.ExecuteDDL(t.Context(), backend.ExecuteDDLIn{
+			DDL: "CREATE UNIQUE INDEX ix_someindex1 ON orders (id, created_at)",
+		})
 		require.ErrorContains(t, err, "already exists")
 	})
-}
 
-func TestDropIndex(t *testing.T) {
-	t.Parallel()
-	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
-	require.NoError(t, err)
-	sqltest.Seed(t, db)
-
-	res, err := CreateIndex(t.Context(), CreateIndexIn{
-		Table:   "orders",
-		Name:    "ix_someindex1",
-		Columns: []string{"id", "created_at"},
-		Unique:  true,
-	}, db)
-
-	require.NoError(t, err)
-	require.True(t, res.Success)
-
-	ix, err := DropIndex(t.Context(), DropIndexIn{Name: "ix_someindex1"}, db)
-	require.True(t, ix.Success)
-	require.NoError(t, err)
-
-	t.Run("NonExistentIndex", func(t *testing.T) {
-		ix, err := DropIndex(t.Context(), DropIndexIn{Name: "ix_someindex1"}, db)
-		require.Nil(t, ix)
-		require.ErrorContains(t, err, "no such index")
+	t.Run("DropIndex", func(t *testing.T) {
+		res, err := b.ExecuteDDL(t.Context(), backend.ExecuteDDLIn{
+			DDL: "DROP INDEX ix_someindex1",
+		})
+		require.NoError(t, err)
+		require.True(t, res.Success)
 	})
 }
 
 func TestExplainQuery(t *testing.T) {
 	t.Parallel()
-	db, err := Connector{}.ConnectRead(SqliteConfig{Path: createFile(t)})
-	require.NoError(t, err)
-	sqltest.Seed(t, db)
+	b := openTestConnection(t)
 
 	t.Run("Explain", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM orders"}, db)
+		res, err := b.ExplainQuery(t.Context(), backend.ExplainQueryIn{Query: "SELECT * FROM orders"})
 		require.NoError(t, err)
-		require.Greater(t, len(res.Plan), 1)
+		require.Equal(t, "json", res.Format)
+		require.Greater(t, len(res.Result), 1)
 	})
 	t.Run("ExplainQueryPlan", func(t *testing.T) {
 		t.Parallel()
-		res, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT * FROM orders", QueryPlan: true}, db)
+		res, err := b.ExplainQuery(t.Context(), backend.ExplainQueryIn{Query: "SELECT * FROM orders", Analyze: true})
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, len(res.Plan), 1)
+		require.Equal(t, "json", res.Format)
+		require.GreaterOrEqual(t, len(res.Result), 1)
 	})
 	t.Run("MalformedQuery", func(t *testing.T) {
 		t.Parallel()
-		_, err := ExplainQuery(t.Context(), ExplainQueryIn{Query: "SELECT NOT SELECT"}, db)
+		_, err := b.ExplainQuery(t.Context(), backend.ExplainQueryIn{Query: "SELECT NOT SELECT"})
 		require.ErrorContains(t, err, "syntax error")
 	})
+}
+
+func TestListMissingIndexes(t *testing.T) {
+	t.Parallel()
+	b := openTestConnection(t)
+	_, err := b.ListMissingIndexes(t.Context())
+	require.ErrorContains(t, err, "not available for SQLite")
+}
+
+func TestListWaitingQueries(t *testing.T) {
+	t.Parallel()
+	b := openTestConnection(t)
+	_, err := b.ListWaitingQueries(t.Context())
+	require.ErrorContains(t, err, "not available for SQLite")
+}
+
+func TestListSlowestQueries(t *testing.T) {
+	t.Parallel()
+	b := openTestConnection(t)
+	_, err := b.ListSlowestQueries(t.Context())
+	require.ErrorContains(t, err, "not available for SQLite")
+}
+
+func TestListDeadlocks(t *testing.T) {
+	t.Parallel()
+	b := openTestConnection(t)
+	_, err := b.ListDeadlocks(t.Context())
+	require.ErrorContains(t, err, "not available for SQLite")
 }

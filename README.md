@@ -1,15 +1,15 @@
 # Databaise
 
-A Model Context Protocol (MCP) server for secure database access. Supports PostgreSQL, SQLite, and SQL Server with permission-based tool registration.
+A Model Context Protocol (MCP) server for secure database access. Supports PostgreSQL, MySQL, SQLite, and SQL Server with unified tools and permission-based access control.
 
 ## Overview
 
-Databaise provides a secure bridge between LLMs and databases by exposing only the tools you explicitly configure. It uses separate database connections for read, write, and admin operations to enforce strict permission boundaries. Currently supports PostgreSQL, SQLite, SQL Server, and MySQL.
+Databaise provides a secure bridge between LLMs and databases through unified MCP tools. It uses separate database connections for read and admin operations to enforce strict permission boundaries.
 
 ## Installation
 
 ### Option 1: Download Pre-built Binary
-Download the latest release from the [releases page](https://github.com/tinternet/databaise/releases). 
+Download the latest release from the [releases page](https://github.com/tinternet/databaise/releases).
 
 ### Option 2: Build from Source
 #### Prerequisites
@@ -50,8 +50,6 @@ go build -o databaise cmd/server/main.go
 
 Create a `config.json` file with your database connections. See [CONFIG.md](CONFIG.md) for full details.
 
-### Configuration Examples
-
 ### Basic Structure
 
 Each database entry has the following structure:
@@ -62,7 +60,6 @@ Each database entry has the following structure:
         "type": "postgres",
         "description": "What data is in this database",
         "read": { ... },
-        "write": { ... },
         "admin": { ... }
     }
 }
@@ -71,9 +68,9 @@ Each database entry has the following structure:
 ### Key Concepts
 
 - **Config Keys**: Each database entry is identified by a key (e.g., `netflix`) - this is passed as the `database_name` parameter when calling tools
-- **Backend Types**: The database type (`postgres`, `mysql`, `sqlserver`, `sqlite`) becomes the prefix for all tools (e.g., `postgres_list_tables`)
+- **Backend Types**: Supported types are `postgres`, `mysql`, `sqlserver`, and `sqlite`
 - **Descriptions**: Help LLMs understand what data is available
-- **Operation Levels**: Only include `read`, `write`, or `admin` sections for the operations you want to enable
+- **Operation Levels**: Only include `read` or `admin` sections for the operations you want to enable
 - **Separate Connections**: Each operation level uses its own DSN/credentials
 
 ### Example Configuration
@@ -85,9 +82,6 @@ Each database entry has the following structure:
         "description": "Netflix viewership data and catalog.",
         "read": {
             "dsn": "postgres://reader:pass@localhost:5432/netflix"
-        },
-        "write": {
-            "dsn": "postgres://writer:pass@localhost:5432/netflix"
         },
         "admin": {
             "dsn": "postgres://admin:pass@localhost:5432/netflix"
@@ -120,65 +114,47 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 ## Available Tools
 
-Tools are registered based on which config sections are present. All tools use the pattern `{backend}_{tool_name}` where `{backend}` is the database type (e.g., `postgres_list_tables`, `mysql_read_query`). The config key (e.g., `netflix`) is passed as a `database_name` parameter to specify which database to query.
+All tools use a unified naming scheme. The `database_name` parameter routes requests to the correct database, and `list_databases` returns the SQL dialect for each database so LLMs can write appropriate SQL.
 
 ### Global Tools
-- `list_databases` - List all configured databases with their available tools
+- `list_databases` - List all configured databases with their SQL dialects and admin access
 
 ### Read Tools
 Available when `read` section is configured:
-- `{backend}_list_tables` - List all tables in the database
-- `{backend}_describe_table` - Get column and index information for a table
-- `{backend}_read_query` - Execute a read-only SQL query
-
-### Write Tools
-*Planned for future release*
+- `list_tables` - List all tables in the database (optionally filter by schema)
+- `describe_table` - Get CREATE TABLE statement, indexes, and constraints
+- `execute_query` - Execute a read-only SQL query
 
 ### Admin Tools
 Available when `admin` section is configured:
+- `explain_query` - Get query execution plan (with optional ANALYZE)
+- `execute_ddl` - Execute DDL statements (CREATE INDEX, DROP INDEX, etc.)
+- `list_missing_indexes` - Get index recommendations based on query patterns
+- `list_waiting_queries` - Show queries that are currently blocked or waiting
+- `list_slowest_queries` - Display slowest queries by total execution time
+- `list_deadlocks` - Retrieve deadlock information
 
-#### Common Admin Tools (All Backends)
-- `{backend}_create_index` - Create an index on a table
-- `{backend}_drop_index` - Drop an index from a table
-- `{backend}_explain_query` - Get query execution plan
+### DBA Tool Notes
 
-#### DBA Monitoring Tools (SQL Server, PostgreSQL, MySQL)
-Advanced diagnostic tools for production database monitoring:
+The DBA monitoring tools (`list_missing_indexes`, `list_waiting_queries`, `list_slowest_queries`, `list_deadlocks`) have database-specific implementations:
 
-- `{backend}_list_missing_indexes` - Identify tables that would benefit from additional indexes
-  - **SQL Server**: Uses missing index DMVs with impact scores
-  - **PostgreSQL**: Analyzes sequential scan statistics from pg_stat_user_tables
-  - **MySQL**: Checks performance_schema for full table scans
+| Tool | PostgreSQL | MySQL | SQL Server | SQLite |
+|------|-----------|-------|------------|--------|
+| `list_missing_indexes` | pg_stat_user_tables | performance_schema | Missing index DMVs | Not supported |
+| `list_waiting_queries` | pg_stat_activity | performance_schema | sys.dm_exec_requests | Not supported |
+| `list_slowest_queries` | pg_stat_statements* | events_statements_summary | Query stats DMV | Not supported |
+| `list_deadlocks` | pg_stat_database | INNODB STATUS | Extended events | Not supported |
 
-- `{backend}_list_waiting_queries` - Show queries that are currently blocked or waiting
-  - **SQL Server**: Uses sys.dm_exec_requests with wait types
-  - **PostgreSQL**: Queries pg_stat_activity with wait events and blocking PIDs
-  - **MySQL**: Leverages performance_schema threads and metadata_locks
-
-- `{backend}_list_slowest_queries` - Display the slowest queries by total execution time
-  - **SQL Server**: Queries sys.dm_exec_query_stats
-  - **PostgreSQL**: Requires pg_stat_statements extension
-  - **MySQL**: Uses performance_schema.events_statements_summary_by_digest
-
-- `{backend}_list_deadlocks` - Retrieve information about database deadlocks
-  - **SQL Server**: Extracts deadlock graphs from extended events
-  - **PostgreSQL**: Shows deadlock counts from pg_stat_database
-  - **MySQL**: Displays most recent deadlock from SHOW ENGINE INNODB STATUS
+*Requires pg_stat_statements extension
 
 ## Security Model
 
 Databaise implements a robust security model to prevent unauthorized database access:
 
 - **Presence-based registration** - Only the tools you configure are exposed
-- **Separate connections** - Each operation level uses its own DSN/credentials  
-- **Readonly enforcement** - Read connections are verified to lack write permissions by default (set `enforce_readonly: false` to bypass)
-- **Transaction isolation (PostgreSQL)** - Read-only transactions prevent query stacking attacks
-
-## Roadmap
-
-Planned tools and features:
-
-- **Write tools** - Insert, update, and delete operations (approach TBD - considering ORM-style `insert_record`/`update_record`/`delete_record` vs raw `write_query`)
+- **Separate connections** - Each operation level uses its own DSN/credentials
+- **Readonly enforcement** - Read connections are verified to lack write permissions by default (set `bypass_readonly_check: true` to bypass)
+- **Transaction isolation (PostgreSQL)** - Optional read-only transactions prevent query stacking attacks (`use_readonly_tx: true`)
 
 ## License
 
